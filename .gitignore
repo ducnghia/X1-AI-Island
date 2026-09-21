@@ -1,0 +1,20 @@
+# MSVC build products
+*.exe
+*.obj
+*.res
+*.pdb
+*.ilk
+
+# Visual Studio state
+.vs/
+Debug/
+Release/
+x64/
+
+# Local diagnostic output
+diagnostics/*.png
+diagnostics/*.log
+
+# Windows metadata
+Thumbs.db
+Desktop.ini

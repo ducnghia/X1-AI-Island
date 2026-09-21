@@ -1,0 +1,3 @@
+#include <windows.h>
+#include <cstdio>
+int main(){SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); HDC dc=GetDC(nullptr); HFONT f=CreateFontW(-14,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Bahnschrift Condensed"); auto old=SelectObject(dc,f); const wchar_t* p[]={L"0%",L"0.2/16G",L"P0",L"61\u00B0C",L"29W"}; int total=0; for(auto s:p){SIZE z{};GetTextExtentPoint32W(dc,s,lstrlenW(s),&z); wprintf(L"%ls=%ld ",s,z.cx);total+=z.cx;} printf("total=%d available=%d\n",total,332-4-121); SelectObject(dc,old);DeleteObject(f);ReleaseDC(nullptr,dc);}
