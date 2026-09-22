@@ -320,6 +320,16 @@ const wchar_t* fanModeName(DWORD mode) {
     return L"BIOS Auto";
 }
 
+void showAbout(HWND hwnd) {
+    MessageBoxW(
+        hwnd,
+        L"Developed with Codex AI and Curiosity\n"
+        L"by nghia.td@3si.vn @2026-09",
+        L"About X1 AI Island",
+        MB_OK|MB_ICONINFORMATION
+    );
+}
+
 BYTE channel(double value) {
     return static_cast<BYTE>((std::max)(0.0,(std::min)(255.0,value)));
 }
@@ -655,7 +665,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         CheckMenuRadioItem(fanModes,200,202,200+(std::min)(g_fans.mode,DWORD{2}),MF_BYCOMMAND);
         std::wstring fanLabel=L"Fan Control";
         if(g_fans.ok) {
-            fanLabel+=L" — ";
+            fanLabel+=L" - ";
             fanLabel+=fanModeName(g_fans.mode);
         }
         fanLabel+=L"\tCtrl+Shift+F";
@@ -671,6 +681,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         }
         AppendMenuW(m,MF_POPUP,reinterpret_cast<UINT_PTR>(shortcuts),L"Hide / show shortcut");
         AppendMenuW(m,MF_SEPARATOR,0,nullptr);
+        AppendMenuW(m,MF_STRING,5,L"About X1 AI Island");
         AppendMenuW(m,MF_STRING,2,L"Exit");
         POINT p{}; GetCursorPos(&p);
         SetForegroundWindow(hwnd);
@@ -684,6 +695,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         }
         if(cmd==3)toggleIsland(hwnd);
         if(cmd>=100 && cmd<100+static_cast<int>(ARRAYSIZE(HOTKEYS))) selectHotkey(hwnd,cmd-100);
+        if(cmd==5)showAbout(hwnd);
         if(cmd==2)DestroyWindow(hwnd);
         return 0;
     }
