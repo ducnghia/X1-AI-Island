@@ -70,6 +70,8 @@ Recommended:
 - **Ctrl+D**: hide/show globally (default).
 - Right-click: open Fan Control, expand/collapse, hide, change the global
   shortcut, view About information, or exit.
+- The Island uses 82% window opacity to soften the dark background while
+  keeping compact telemetry and the animated border easy to read.
 - Expanded view is intentionally concise: GPU status, VRAM use, fan mode, and
   both fan RPM values. It omits duplicate border and memory-engine details.
 - Hover for one second: hide the Island for five seconds so content beneath it can be seen, then return automatically.

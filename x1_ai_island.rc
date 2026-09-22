@@ -1,3 +1,19 @@
+#include <windows.h>
 #include "resource.h"
 
 IDB_NVIDIA_LOGO BITMAP "nvidia_logo.bmp"
+IDB_3S_LOGO BITMAP "3s_logo_about.bmp"
+
+IDD_ABOUT_DIALOG DIALOGEX 0, 0, 250, 136
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About X1 AI Island"
+FONT 9, "Segoe UI"
+BEGIN
+    CONTROL         IDB_3S_LOGO,IDC_ABOUT_LOGO,"Static",
+                    SS_BITMAP | SS_CENTERIMAGE,15,8,220,50
+    LTEXT           "Developed with Codex AI and Curiosity",IDC_ABOUT_TITLE,
+                    10,58,230,12,SS_CENTER
+    LTEXT           "by nghia.td@3si.vn @2026-09",IDC_ABOUT_CREDIT,
+                    10,72,230,12,SS_CENTER
+    DEFPUSHBUTTON   "OK",IDOK,100,86,50,16
+END

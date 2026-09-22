@@ -1,3 +1,8 @@
 #pragma once
 
 #define IDB_NVIDIA_LOGO 101
+#define IDB_3S_LOGO 102
+#define IDD_ABOUT_DIALOG 201
+#define IDC_ABOUT_LOGO 1001
+#define IDC_ABOUT_TITLE 1002
+#define IDC_ABOUT_CREDIT 1003

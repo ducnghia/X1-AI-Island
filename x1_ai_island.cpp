@@ -178,6 +178,7 @@ const UINT_PTR ANIMATION_TIMER_ID=4;
 const int HOTKEY_ID=1;
 const int FAN_HOTKEY_ID=2;
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
+const BYTE ISLAND_OPACITY=210; // 82% keeps the compact telemetry readable.
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -320,14 +321,44 @@ const wchar_t* fanModeName(DWORD mode) {
     return L"BIOS Auto";
 }
 
+INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
+    switch(msg) {
+    case WM_INITDIALOG: {
+        HBITMAP logo=LoadBitmapW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(IDB_3S_LOGO));
+        SetWindowLongPtrW(dialog,DWLP_USER,reinterpret_cast<LONG_PTR>(logo));
+        SendDlgItemMessageW(dialog,IDC_ABOUT_LOGO,STM_SETIMAGE,IMAGE_BITMAP,
+                            reinterpret_cast<LPARAM>(logo));
+        return TRUE;
+    }
+    case WM_CTLCOLORDLG:
+        return reinterpret_cast<INT_PTR>(GetStockObject(WHITE_BRUSH));
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=reinterpret_cast<HDC>(wp);
+        HWND control=reinterpret_cast<HWND>(lp);
+        SetBkMode(dc,TRANSPARENT);
+        int id=GetDlgCtrlID(control);
+        if(id==IDC_ABOUT_TITLE) SetTextColor(dc,RGB(52,148,245));
+        else if(id==IDC_ABOUT_CREDIT) SetTextColor(dc,RGB(105,105,105));
+        return reinterpret_cast<INT_PTR>(GetStockObject(WHITE_BRUSH));
+    }
+    case WM_COMMAND:
+        if(LOWORD(wp)==IDOK || LOWORD(wp)==IDCANCEL) {
+            EndDialog(dialog,LOWORD(wp));
+            return TRUE;
+        }
+        break;
+    case WM_DESTROY: {
+        HBITMAP logo=reinterpret_cast<HBITMAP>(GetWindowLongPtrW(dialog,DWLP_USER));
+        if(logo) DeleteObject(logo);
+        return TRUE;
+    }
+    }
+    return FALSE;
+}
+
 void showAbout(HWND hwnd) {
-    MessageBoxW(
-        hwnd,
-        L"Developed with Codex AI and Curiosity\n"
-        L"by nghia.td@3si.vn @2026-09",
-        L"About X1 AI Island",
-        MB_OK|MB_ICONINFORMATION
-    );
+    DialogBoxParamW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(IDD_ABOUT_DIALOG),
+                    hwnd,AboutDialogProc,0);
 }
 
 BYTE channel(double value) {
@@ -699,6 +730,12 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if(cmd==2)DestroyWindow(hwnd);
         return 0;
     }
+    case WM_COMMAND:
+        if(LOWORD(wp)==5) {
+            showAbout(hwnd);
+            return 0;
+        }
+        break;
     case WM_PAINT: paint(hwnd); return 0;
     case WM_DESTROY:
         KillTimer(hwnd,STATS_TIMER_ID);
@@ -734,10 +771,11 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     int sw=GetSystemMetrics(SM_CXSCREEN);
     const int initialWidth=560;
     const int initialX=(std::max)(0,(sw-initialWidth)/2);
-    g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+    g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,
         wc.lpszClassName,L"X1 AI Island",WS_POPUP,
         initialX,18,initialWidth,46,nullptr,nullptr,h,nullptr);
     if(!g_hwnd) return 1;
+    SetLayeredWindowAttributes(g_hwnd,0,ISLAND_OPACITY,LWA_ALPHA);
     setWindowSize();
     ShowWindow(g_hwnd,SW_SHOWNOACTIVATE);
     UpdateWindow(g_hwnd);
