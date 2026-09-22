@@ -11,7 +11,7 @@ driver through its documented IOCTL boundary.
 
 ## EC protocol reference
 
-The read-only Embedded Controller transaction and locking design was informed
+The Embedded Controller transaction and locking design was informed
 by the MIT-licensed `yamato-ec` crate from Yamato:
 https://github.com/mackid1993/Yamato
 

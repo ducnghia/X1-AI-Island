@@ -8,9 +8,8 @@ A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RT
 - Dedicated VRAM used / total
 - GPU temperature
 - GPU power draw when the driver exposes it
-- NVIDIA memory-engine utilization in expanded view
 - NVIDIA performance state (`P0` through `P8` when exposed by the driver)
-- Fan 1 and Fan 2 RPM in both compact and expanded views through the read-only `X1FanService`
+- Fan 1 and Fan 2 RPM in both compact and expanded views through `X1FanService`
 - A thin rounded status border driven by the higher of VRAM usage or dGPU load:
   - NVIDIA-green breathing pulse below 50%
   - yellow-dominant RGB pulse from 50% through 79%
@@ -29,19 +28,24 @@ No CUDA Toolkit, Python, .NET, Electron, or LibreHardwareMonitor is required. `n
 
 ## Fan telemetry service
 
-`X1FanService.exe` is a read-only LocalSystem service for the ThinkPad X1
-Extreme Gen 4 machine type `20Y6`. It reads the two fan tachometers through
-the open-source PawnIO driver and publishes only RPM telemetry to a read-only
-shared-memory block consumed by the Island.
+`X1FanService.exe` is a LocalSystem service and a small fan-mode controller for
+the ThinkPad X1 Extreme Gen 4 machine type `20Y6`. It reads both tachometers
+through the open-source PawnIO driver and publishes telemetry to the Island.
 
-- It never writes the fan-control register.
-- It never changes the BIOS fan mode or fan curve.
+- It always starts in **BIOS Auto**, the default and safest mode.
+- **Cool** starts both fans earlier.
+- **Aggressive** starts both fans earlier and at higher EC levels.
+- At high temperature, custom modes return control to BIOS.
+- Stop, shutdown, and normal service exit also return control to BIOS.
 - It restores the fan selector to Fan 1 after each sample.
 - Missing service/driver data appears as `N/A`; the Island continues normally.
 
 Install PawnIO 2.2.0 first, build the project, then run
 `install_fan_service.bat` as Administrator. Use
 `uninstall_fan_service.bat` to remove only X1FanService.
+
+Run `X1FanService.exe` normally, or select **Fan control** in the Island's
+right-click menu, to choose BIOS Auto, Cool, or Aggressive.
 
 ## Build
 
@@ -59,7 +63,10 @@ Recommended:
 - Drag: move Island.
 - Double-click: expand/collapse.
 - **Ctrl+D**: hide/show globally (default).
-- Right-click: expand/collapse, hide, change the global shortcut, or exit.
+- Right-click: open Fan Control, expand/collapse, hide, change the global
+  shortcut, or exit.
+- Expanded view is intentionally concise: GPU status, VRAM use, fan mode, and
+  both fan RPM values. It omits duplicate border and memory-engine details.
 - Hover for one second: hide the Island for five seconds so content beneath it can be seen, then return automatically.
 - Refresh interval: 1 second.
 

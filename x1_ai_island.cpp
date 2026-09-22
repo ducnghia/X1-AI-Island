@@ -114,6 +114,8 @@ struct Stats {
 
 struct FanStats {
     DWORD fan1=0, fan2=0, status=X1_FAN_STARTING;
+    DWORD mode=X1_FAN_MODE_BIOS_AUTO;
+    LONG hottestTemp=-1;
     bool ok=false;
 } g_fans;
 
@@ -140,6 +142,8 @@ struct FanTelemetryReader {
         g_fans.status=copy.status;
         g_fans.fan1=copy.fan1Rpm;
         g_fans.fan2=copy.fan2Rpm;
+        g_fans.mode=copy.activeMode;
+        g_fans.hottestTemp=copy.hottestTempC;
         g_fans.ok=copy.status==X1_FAN_OK && GetTickCount64()-copy.updatedTick<5000;
     }
     ~FanTelemetryReader() {
@@ -303,6 +307,22 @@ const wchar_t* loadSourceName(LoadSource source) {
     return L"N/A";
 }
 
+const wchar_t* fanModeName(DWORD mode) {
+    if(mode==X1_FAN_MODE_COOL) return L"Cool";
+    if(mode==X1_FAN_MODE_AGGRESSIVE) return L"Aggressive";
+    return L"BIOS Auto";
+}
+
+void openFanControl(HWND hwnd) {
+    wchar_t path[MAX_PATH]{};
+    GetModuleFileNameW(nullptr,path,MAX_PATH);
+    wchar_t* slash=wcsrchr(path,L'\\');
+    if(slash) wcscpy_s(slash+1,MAX_PATH-(slash+1-path),L"X1FanService.exe");
+    if(reinterpret_cast<INT_PTR>(ShellExecuteW(hwnd,L"open",path,nullptr,nullptr,SW_SHOWNORMAL))<=32)
+        MessageBoxW(hwnd,L"X1FanService.exe could not be opened.",L"X1 AI Island",
+                    MB_OK|MB_ICONERROR);
+}
+
 BYTE channel(double value) {
     return static_cast<BYTE>((std::max)(0.0,(std::min)(255.0,value)));
 }
@@ -377,7 +397,7 @@ std::wstring widen(const std::string& s) {
 
 void setWindowSize() {
     int w = 560;
-    int h = g_expanded ? 160 : 46;
+    int h = g_expanded ? 128 : 46;
     RECT r{}; GetWindowRect(g_hwnd,&r);
     SetWindowPos(g_hwnd,HWND_TOPMOST,r.left,r.top,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     HRGN region=CreateRoundRectRgn(0,0,w+1,h+1,24,24);
@@ -484,31 +504,31 @@ void paint(HWND hwnd) {
     if(g_expanded) {
         SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
-        std::wstringstream a,b,c,d;
+        std::wstringstream a,b,c;
         if(g_stats.ok) {
-            a << L"GPU load    " << (g_stats.utilOk ? std::to_wstring(decision.gpu)+L"%" : L"N/A")
-              << L"        VRAM fill    " << (g_stats.memoryOk ? std::to_wstring(decision.vram)+L"%" : L"N/A")
-              << L"        Border    " << decision.effective << L"% (" << loadSourceName(decision.source) << L")";
-            b << L"Dedicated VRAM     " << std::fixed << std::setprecision(2);
+            a << L"GPU    " << (g_stats.utilOk ? std::to_wstring(decision.gpu)+L"%" : L"N/A")
+              << L"        Temperature    " << (g_stats.tempOk ? std::to_wstring(g_stats.temp)+L"\u00B0C" : L"N/A")
+              << L"        Power    ";
+            if(g_stats.watts>=0) a << std::fixed << std::setprecision(1) << g_stats.watts << L"W";
+            else a << L"N/A";
+            a << L"        " << (g_stats.pstateOk ? L"P"+std::to_wstring(g_stats.pstate) : L"P?");
+            b << L"VRAM    " << std::fixed << std::setprecision(2);
             if(g_stats.memoryOk) b << g_stats.used/1073741824.0 << L" / " << g_stats.total/1073741824.0 << L" GB";
             else b << L"N/A";
-            b << L"        Memory engine    " << (g_stats.utilOk ? std::to_wstring(g_stats.memUtil)+L"%" : L"N/A");
-            b << L"        " << (g_stats.pstateOk ? L"P"+std::to_wstring(g_stats.pstate) : L"P?");
-            c << L"Temperature    " << (g_stats.tempOk ? std::to_wstring(g_stats.temp)+L"\u00B0C" : L"N/A");
-            if(g_stats.watts>=0) c << L"        Power    " << std::fixed << std::setprecision(1) << g_stats.watts << L"W";
-            d << L"Fan 1    " << (g_fans.ok ? std::to_wstring(g_fans.fan1)+L" RPM" : L"N/A")
+            b << L"        Fill    " << decision.vram << L"%";
+            c << L"Cooling    " << (g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable")
+              << L"        Fan 1    " << (g_fans.ok ? std::to_wstring(g_fans.fan1)+L" RPM" : L"N/A")
               << L"        Fan 2    " << (g_fans.ok ? std::to_wstring(g_fans.fan2)+L" RPM" : L"N/A");
         } else {
             a << (g_nvml.ready ? L"GPU readings temporarily unavailable; retrying every second."
                               : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.");
-            b << L"N/A means the driver did not provide that reading.";
+            c << L"Cooling    " << (g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable");
         }
-        RECT r1={16,45,rc.right-16,72}, r2={16,72,rc.right-16,100};
-        RECT r3={16,100,rc.right-16,128}, r4={16,128,rc.right-16,154};
+        RECT r1={16,45,rc.right-16,72}, r2={16,72,rc.right-16,99};
+        RECT r3={16,99,rc.right-16,124};
         DrawTextW(dc,a.str().c_str(),-1,&r1,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
         DrawTextW(dc,b.str().c_str(),-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
         DrawTextW(dc,c.str().c_str(),-1,&r3,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        DrawTextW(dc,d.str().c_str(),-1,&r4,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
     }
     EndPaint(hwnd,&ps);
 }
@@ -584,6 +604,9 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         HMENU m=CreatePopupMenu();
         HMENU shortcuts=CreatePopupMenu();
         AppendMenuW(m,MF_STRING,1,L"Expand / Collapse");
+        std::wstring fanLabel=L"Fan control...\t";
+        fanLabel+=fanModeName(g_fans.mode);
+        AppendMenuW(m,MF_STRING,4,fanLabel.c_str());
         std::wstring hideLabel=L"Hide Island\t";
         hideLabel+=HOTKEYS[g_hotkeyChoice].label;
         AppendMenuW(m,MF_STRING,3,hideLabel.c_str());
@@ -602,6 +625,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         g_contextOpen=false;
         DestroyMenu(m);
         if(cmd==1){g_expanded=!g_expanded;setWindowSize();}
+        if(cmd==4)openFanControl(hwnd);
         if(cmd==3)toggleIsland(hwnd);
         if(cmd>=100 && cmd<100+static_cast<int>(ARRAYSIZE(HOTKEYS))) selectHotkey(hwnd,cmd-100);
         if(cmd==2)DestroyWindow(hwnd);

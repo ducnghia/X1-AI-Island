@@ -6,6 +6,8 @@
 #include "fan_telemetry.h"
 
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace {
 constexpr wchar_t SERVICE_NAME[] = L"X1FanService";
@@ -15,6 +17,8 @@ constexpr DWORD IOCTL_EXECUTE_FN = 0xA1B22104;
 constexpr WORD EC_DATA = 0x62, EC_STATUS = 0x66;
 constexpr BYTE OBF = 0x01, IBF = 0x02, CMD_READ = 0x80, CMD_WRITE = 0x81;
 constexpr BYTE REG_FAN_SELECT = 0x31, REG_FAN_LO = 0x84, REG_FAN_HI = 0x85;
+constexpr BYTE REG_FAN_CTRL = 0x2f, REG_TEMP0 = 0x78, REG_TEMP1 = 0xc0;
+constexpr BYTE FAN_BIOS = 0x80;
 
 SERVICE_STATUS_HANDLE g_statusHandle{};
 SERVICE_STATUS g_serviceStatus{};
@@ -145,12 +149,61 @@ public:
         if(ok) { fan1=rpm[0]; fan2=rpm[1]; }
         return ok;
     }
+    bool readHottestTemp(LONG& hottest) {
+        DWORD wait=WaitForSingleObject(mutex_,1000);
+        if(wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return false;
+        bool ok=true;
+        hottest=-127;
+        for(int i=0;i<12 && ok;i++) {
+            BYTE raw=0;
+            BYTE reg=i<8 ? static_cast<BYTE>(REG_TEMP0+i) : static_cast<BYTE>(REG_TEMP1+i-8);
+            ok=readRegister(reg,raw);
+            signed char temp=static_cast<signed char>(raw);
+            if(ok && temp>0 && temp<120 && temp>hottest) hottest=temp;
+        }
+        ReleaseMutex(mutex_);
+        return ok && hottest>-127;
+    }
+    bool setFanLevel(BYTE level) {
+        DWORD wait=WaitForSingleObject(mutex_,1000);
+        if(wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return false;
+        bool ok=true;
+        for(BYTE fan=0;fan<2 && ok;fan++) {
+            BYTE verify=0;
+            ok=writeRegister(REG_FAN_SELECT,fan) && writeRegister(REG_FAN_CTRL,level) &&
+               readRegister(REG_FAN_CTRL,verify) && (verify&0xc7)==(level&0xc7);
+        }
+        writeRegister(REG_FAN_SELECT,0);
+        ReleaseMutex(mutex_);
+        return ok;
+    }
 };
+
+BYTE curveLevel(DWORD mode,LONG temp,BYTE current,bool sameMode) {
+    const LONG* thresholds=nullptr;
+    static const LONG cool[]={45,52,59,66,74};
+    static const LONG aggressive[]={38,45,52,59,68};
+    thresholds=mode==X1_FAN_MODE_AGGRESSIVE ? aggressive : cool;
+    const BYTE levels[]={2,3,5,7,FAN_BIOS};
+    int desired=0;
+    while(desired<4 && temp>=thresholds[desired]) desired++;
+    BYTE target=levels[desired];
+
+    // Three-degree hysteresis prevents level hunting while cooling down.
+    if(sameMode && current!=FAN_BIOS) {
+        int currentIndex=0;
+        while(currentIndex<4 && levels[currentIndex]!=current) currentIndex++;
+        if(desired<currentIndex && temp>=thresholds[currentIndex-1]-3) return current;
+    } else if(sameMode && target!=FAN_BIOS && temp>=thresholds[3]-5) {
+        return FAN_BIOS;
+    }
+    return target;
+}
 
 bool createTelemetry() {
     PSECURITY_DESCRIPTOR sd{};
     ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        L"D:(A;;GR;;;WD)(A;;GA;;;SY)(A;;GA;;;BA)",SDDL_REVISION_1,&sd,nullptr);
+        L"D:(A;;GRGW;;;IU)(A;;GA;;;SY)(A;;GA;;;BA)",SDDL_REVISION_1,&sd,nullptr);
     SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
     const wchar_t* name=g_consoleMode ? L"Local\\X1FanTelemetryProbe" : X1_FAN_MAPPING_NAME;
     g_mapping=CreateFileMappingW(INVALID_HANDLE_VALUE,sd?&sa:nullptr,PAGE_READWRITE,0,
@@ -161,6 +214,9 @@ bool createTelemetry() {
     if(!g_shared) return false;
     ZeroMemory(g_shared,sizeof(*g_shared));
     g_shared->magic=X1_FAN_MAGIC; g_shared->version=X1_FAN_VERSION;
+    g_shared->requestedMode=X1_FAN_MODE_BIOS_AUTO;
+    g_shared->activeMode=X1_FAN_MODE_BIOS_AUTO;
+    g_shared->hottestTempC=-1;
     publish(X1_FAN_STARTING);
     return true;
 }
@@ -171,7 +227,18 @@ void runWorker() {
     PawnEc ec;
     DWORD opened=ec.open();
     if(opened!=X1_FAN_OK) { publish(opened,0,0,GetLastError()); return; }
+    // A previous process could have terminated while holding a manual EC
+    // level. Every fresh service start tries to hand both fans to BIOS.
+    // Lenovo firmware may briefly own the EC during startup, so a failed
+    // first attempt must not terminate the service; the main loop retries.
+    bool initialBios=false;
+    for(int attempt=0;attempt<3 && !initialBios;attempt++) {
+        initialBios=ec.setFanLevel(FAN_BIOS);
+        if(!initialBios) Sleep(300);
+    }
     unsigned consecutiveFailures=0;
+    DWORD activeMode=initialBios ? X1_FAN_MODE_BIOS_AUTO : 0xffffffff;
+    BYTE appliedLevel=initialBios ? FAN_BIOS : 0xff;
     while(WaitForSingleObject(g_stopEvent,1000)==WAIT_TIMEOUT) {
         DWORD f1=0,f2=0;
         if(ec.sample(f1,f2)) {
@@ -182,7 +249,28 @@ void runWorker() {
             // own the controller. Do not flash N/A for a single missed pass.
             publish(X1_FAN_EC_UNAVAILABLE,0,0,GetLastError());
         }
+
+        DWORD requested=static_cast<DWORD>(
+            InterlockedCompareExchange(&g_shared->requestedMode,0,0));
+        if(requested>X1_FAN_MODE_AGGRESSIVE) requested=X1_FAN_MODE_BIOS_AUTO;
+        LONG hottest=-1;
+        bool modeOk=true;
+        if(requested==X1_FAN_MODE_BIOS_AUTO) {
+            if(activeMode!=requested || appliedLevel!=FAN_BIOS)
+                modeOk=ec.setFanLevel(FAN_BIOS);
+            if(modeOk) { activeMode=requested; appliedLevel=FAN_BIOS; }
+        } else if(ec.readHottestTemp(hottest)) {
+            BYTE target=curveLevel(requested,hottest,
+                appliedLevel,activeMode==requested);
+            if(activeMode!=requested || target!=appliedLevel)
+                modeOk=ec.setFanLevel(target);
+            if(modeOk) { activeMode=requested; appliedLevel=target; }
+        }
+        g_shared->activeMode=activeMode;
+        g_shared->hottestTempC=hottest;
     }
+    ec.setFanLevel(FAN_BIOS);
+    g_shared->activeMode=X1_FAN_MODE_BIOS_AUTO;
 }
 
 void setServiceState(DWORD state,DWORD error=NO_ERROR) {
@@ -207,17 +295,79 @@ void WINAPI serviceMain(DWORD,LPWSTR*) {
     runWorker();
     setServiceState(SERVICE_STOPPED);
 }
+
+const wchar_t* modeName(DWORD mode) {
+    if(mode==X1_FAN_MODE_COOL) return L"Cool";
+    if(mode==X1_FAN_MODE_AGGRESSIVE) return L"Aggressive";
+    return L"BIOS Auto";
 }
 
-int wmain(int argc,wchar_t** argv) {
-    if(argc>1 && wcscmp(argv[1],L"--console")==0) {
+int showController() {
+    HANDLE mapping=OpenFileMappingW(FILE_MAP_READ|FILE_MAP_WRITE,FALSE,X1_FAN_MAPPING_NAME);
+    if(!mapping) {
+        MessageBoxW(nullptr,L"X1FanService is not running or its telemetry is unavailable.",
+                    L"X1 Fan Control",MB_OK|MB_ICONERROR);
+        return 1;
+    }
+    auto shared=static_cast<X1FanTelemetry*>(
+        MapViewOfFile(mapping,FILE_MAP_READ|FILE_MAP_WRITE,0,0,sizeof(X1FanTelemetry)));
+    if(!shared || shared->magic!=X1_FAN_MAGIC || shared->version!=X1_FAN_VERSION) {
+        if(shared) UnmapViewOfFile(shared);
+        CloseHandle(mapping);
+        MessageBoxW(nullptr,L"X1FanService telemetry version does not match this controller.",
+                    L"X1 Fan Control",MB_OK|MB_ICONERROR);
+        return 1;
+    }
+
+    std::wstring first=L"Current mode: ";
+    first+=modeName(shared->activeMode);
+    first+=L"\n\nSelect Yes for BIOS Auto (default and safest).\n"
+            L"Select No to choose a custom cooling mode.\n"
+            L"Select Cancel to leave the mode unchanged.";
+    int answer=MessageBoxW(nullptr,first.c_str(),L"X1 Fan Control",
+                           MB_YESNOCANCEL|MB_ICONINFORMATION|MB_DEFBUTTON1);
+    DWORD requested=X1_FAN_MODE_BIOS_AUTO;
+    bool selected=answer==IDYES;
+    if(answer==IDNO) {
+        int custom=MessageBoxW(nullptr,
+            L"Select Yes for Cool.\n"
+            L"Select No for Aggressive.\n"
+            L"Select Cancel to leave the mode unchanged.\n\n"
+            L"Both custom modes return control to BIOS at high temperature.",
+            L"Choose custom fan mode",MB_YESNOCANCEL|MB_ICONWARNING|MB_DEFBUTTON1);
+        if(custom==IDYES) { requested=X1_FAN_MODE_COOL; selected=true; }
+        if(custom==IDNO) { requested=X1_FAN_MODE_AGGRESSIVE; selected=true; }
+    }
+    if(selected) {
+        InterlockedExchange(&shared->requestedMode,requested);
+        ULONGLONG deadline=GetTickCount64()+4000;
+        while(GetTickCount64()<deadline && shared->activeMode!=requested) Sleep(100);
+        std::wstring result=L"Requested mode: ";
+        result+=modeName(requested);
+        result+=shared->activeMode==requested ? L"\n\nMode is active." :
+                                               L"\n\nRequest sent; the service is still applying it.";
+        MessageBoxW(nullptr,result.c_str(),L"X1 Fan Control",
+                    MB_OK|(shared->activeMode==requested?MB_ICONINFORMATION:MB_ICONWARNING));
+    }
+    UnmapViewOfFile(shared);
+    CloseHandle(mapping);
+    return 0;
+}
+}
+
+int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int) {
+    int argc=0;
+    LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
+    bool console=argc>1 && wcscmp(argv[1],L"--console")==0;
+    if(argv) LocalFree(argv);
+    if(console) {
         g_consoleMode=true;
         g_stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
         runWorker();
-        if(g_shared) wprintf(L"status=%lu fan1=%lu fan2=%lu error=%lu\n",
-            g_shared->status,g_shared->fan1Rpm,g_shared->fan2Rpm,g_shared->lastError);
         return g_shared && g_shared->status==X1_FAN_OK ? 0 : 1;
     }
     SERVICE_TABLE_ENTRYW table[]={{const_cast<LPWSTR>(SERVICE_NAME),serviceMain},{nullptr,nullptr}};
-    return StartServiceCtrlDispatcherW(table) ? 0 : static_cast<int>(GetLastError());
+    if(StartServiceCtrlDispatcherW(table)) return 0;
+    return GetLastError()==ERROR_FAILED_SERVICE_CONTROLLER_CONNECT ? showController()
+                                                                   : static_cast<int>(GetLastError());
 }

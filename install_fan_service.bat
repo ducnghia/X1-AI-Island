@@ -18,6 +18,8 @@ if errorlevel 1 (
 )
 if errorlevel 1 exit /b 1
 sc config X1FanService depend= PawnIO >nul
-sc description X1FanService "Read-only dual-fan RPM telemetry for X1 AI Island through PawnIO." >nul
+sc description X1FanService "Dual-fan RPM telemetry and safe optional fan modes for X1 AI Island." >nul
+sc failure X1FanService reset= 86400 actions= restart/1000/restart/3000/restart/10000 >nul
 sc start X1FanService
+powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Programs')+'\X1 Fan Control.lnk');$s.TargetPath='%DEST%\X1FanService.exe';$s.WorkingDirectory='%DEST%';$s.Save()"
 exit /b %errorlevel%
