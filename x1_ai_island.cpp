@@ -1,10 +1,9 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <string>
-#include <sstream>
-#include <iomanip>
 #include <algorithm>
 #include <array>
+#include <cstdarg>
 #include <cmath>
 #include "resource.h"
 #include "fan_telemetry.h"
@@ -13,7 +12,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v0.1
+// X1 AI Island v1.0
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -160,6 +159,9 @@ struct FanTelemetryReader {
 HWND g_hwnd{};
 HFONT g_font{}, g_metricsFont{}, g_smallFont{};
 HBITMAP g_nvidiaLogo{};
+HBRUSH g_backgroundBrush{};
+std::array<std::wstring,8> g_compactParts{};
+std::array<std::wstring,3> g_expandedLines{};
 POINT g_dragStart{};
 bool g_dragging=false;
 bool g_expanded=false;
@@ -179,6 +181,8 @@ const int HOTKEY_ID=1;
 const int FAN_HOTKEY_ID=2;
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=210; // 82% keeps the compact telemetry readable.
+const UINT ANIMATION_INTERVAL_MS=100;
+const wchar_t APP_VERSION[]=L"1.0";
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -245,12 +249,22 @@ void selectHotkey(HWND hwnd,int choice) {
     }
 }
 
+void startAnimation(HWND hwnd) {
+    if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden)
+        SetTimer(hwnd,ANIMATION_TIMER_ID,ANIMATION_INTERVAL_MS,nullptr);
+}
+
+void stopAnimation(HWND hwnd) {
+    KillTimer(hwnd,ANIMATION_TIMER_ID);
+}
+
 void showIsland(HWND hwnd) {
     g_userHidden=false;
     g_hoverHidden=false;
     KillTimer(hwnd,RESHOW_TIMER_ID);
     ShowWindow(hwnd,SW_SHOWNOACTIVATE);
     SetWindowPos(hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    startAnimation(hwnd);
 }
 
 void toggleIsland(HWND hwnd) {
@@ -261,6 +275,7 @@ void toggleIsland(HWND hwnd) {
         g_hoverHidden=false;
         KillTimer(hwnd,HOVER_TIMER_ID);
         KillTimer(hwnd,RESHOW_TIMER_ID);
+        stopAnimation(hwnd);
         ShowWindow(hwnd,SW_HIDE);
     }
 }
@@ -309,16 +324,19 @@ LoadLevel loadLevel(const Stats& s) {
     return assessLoad(s).level;
 }
 
-const wchar_t* loadSourceName(LoadSource source) {
-    if(source==LoadSource::GPU) return L"GPU";
-    if(source==LoadSource::VRAM) return L"VRAM";
-    return L"N/A";
-}
-
 const wchar_t* fanModeName(DWORD mode) {
     if(mode==X1_FAN_MODE_COOL) return L"Cool";
     if(mode==X1_FAN_MODE_AGGRESSIVE) return L"Aggressive";
     return L"BIOS Auto";
+}
+
+std::wstring formatText(const wchar_t* format,...) {
+    wchar_t buffer[256]{};
+    va_list args;
+    va_start(args,format);
+    _vsnwprintf_s(buffer,ARRAYSIZE(buffer),_TRUNCATE,format,args);
+    va_end(args);
+    return buffer;
 }
 
 INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
@@ -328,6 +346,9 @@ INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
         SetWindowLongPtrW(dialog,DWLP_USER,reinterpret_cast<LONG_PTR>(logo));
         SendDlgItemMessageW(dialog,IDC_ABOUT_LOGO,STM_SETIMAGE,IMAGE_BITMAP,
                             reinterpret_cast<LPARAM>(logo));
+        SetDlgItemTextW(dialog,IDC_ABOUT_VERSION,formatText(L"X1 AI Island v%s",APP_VERSION).c_str());
+        SendDlgItemMessageW(dialog,IDC_ABOUT_VERSION,WM_SETFONT,
+                            reinterpret_cast<WPARAM>(g_metricsFont),TRUE);
         return TRUE;
     }
     case WM_CTLCOLORDLG:
@@ -337,7 +358,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
         HWND control=reinterpret_cast<HWND>(lp);
         SetBkMode(dc,TRANSPARENT);
         int id=GetDlgCtrlID(control);
-        if(id==IDC_ABOUT_TITLE) SetTextColor(dc,RGB(52,148,245));
+        if(id==IDC_ABOUT_VERSION || id==IDC_ABOUT_TITLE) SetTextColor(dc,RGB(52,148,245));
         else if(id==IDC_ABOUT_CREDIT) SetTextColor(dc,RGB(105,105,105));
         return reinterpret_cast<INT_PTR>(GetStockObject(WHITE_BRUSH));
     }
@@ -425,14 +446,6 @@ void updateStats() {
     g_fanReader.update();
 }
 
-std::wstring widen(const std::string& s) {
-    if(s.empty()) return L"";
-    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,nullptr,0);
-    std::wstring w(n? n-1:0,L'\0');
-    if(n>1) MultiByteToWideChar(CP_UTF8,0,s.c_str(),-1,w.data(),n);
-    return w;
-}
-
 void setWindowSize() {
     int w = 560;
     int h = g_expanded ? 128 : 46;
@@ -444,46 +457,74 @@ void setWindowSize() {
 
 std::array<std::wstring,8> compactSegments() {
     std::array<std::wstring,8> parts{};
-    parts[0]=g_stats.utilOk ? std::to_wstring(g_stats.gpu)+L"%" : L"N/A";
+    parts[0]=g_stats.utilOk ? formatText(L"%u%%",g_stats.gpu) : L"N/A";
     if(g_stats.memoryOk) {
-        std::wstringstream vram;
-        double totalGB=g_stats.total/1073741824.0;
-        vram << std::fixed << std::setprecision(1) << g_stats.used/1073741824.0 << L"/";
-        if(totalGB==static_cast<unsigned long long>(totalGB)) {
-            vram << static_cast<unsigned long long>(totalGB);
-        } else {
-            vram << std::fixed << std::setprecision(1) << totalGB;
-        }
-        vram << L"G";
-        parts[1]=vram.str();
+        constexpr double GIB=1073741824.0;
+        double usedGB=g_stats.used/GIB;
+        double totalGB=g_stats.total/GIB;
+        if(g_stats.total%1073741824ULL==0)
+            parts[1]=formatText(L"%.1f/%lluG",usedGB,g_stats.total/1073741824ULL);
+        else
+            parts[1]=formatText(L"%.1f/%.1fG",usedGB,totalGB);
     } else {
         parts[1]=L"VRAM N/A";
     }
-    parts[2]=g_stats.pstateOk ? L"P"+std::to_wstring(g_stats.pstate) : L"P?";
-    parts[3]=g_stats.tempOk ? std::to_wstring(g_stats.temp)+L"\u00B0C" : L"Temp N/A";
-    if(g_stats.watts>=0) {
-        std::wstringstream power;
-        power << std::fixed << std::setprecision(0) << g_stats.watts << L"W";
-        parts[4]=power.str();
-    } else {
-        parts[4]=L"--W";
-    }
+    parts[2]=g_stats.pstateOk ? formatText(L"P%u",g_stats.pstate) : L"P?";
+    parts[3]=g_stats.tempOk ? formatText(L"%u\u00B0C",g_stats.temp) : L"Temp N/A";
+    parts[4]=g_stats.watts>=0 ? formatText(L"%.0fW",g_stats.watts) : L"--W";
     if(g_fans.ok && g_fans.mode==X1_FAN_MODE_COOL) parts[5]=L"COOL";
     if(g_fans.ok && g_fans.mode==X1_FAN_MODE_AGGRESSIVE) parts[5]=L"AGGR";
-    parts[6]=g_fans.ok ? L"F1 "+std::to_wstring(g_fans.fan1) : L"F1 --";
-    parts[7]=g_fans.ok ? L"F2 "+std::to_wstring(g_fans.fan2) : L"F2 --";
+    parts[6]=g_fans.ok ? formatText(L"F1 %lu",g_fans.fan1) : L"F1 --";
+    parts[7]=g_fans.ok ? formatText(L"F2 %lu",g_fans.fan2) : L"F2 --";
     return parts;
 }
 
 std::wstring compactMetrics() {
     auto parts=compactSegments();
-    std::wstringstream ss;
-    for(size_t i=0;i<parts.size();++i) {
-        if(parts[i].empty()) continue;
-        if(ss.tellp()>0) ss << L" ";
-        ss << parts[i];
+    std::wstring result;
+    for(const auto& part:parts) {
+        if(part.empty()) continue;
+        if(!result.empty()) result.push_back(L' ');
+        result+=part;
     }
-    return ss.str();
+    return result;
+}
+
+void refreshDisplayCache() {
+    g_compactParts=compactSegments();
+    g_expandedLines={L"",L"",L""};
+    LoadDecision decision=assessLoad(g_stats);
+
+    if(g_stats.ok) {
+        std::wstring gpu=g_stats.utilOk ? formatText(L"%u%%",decision.gpu) : L"N/A";
+        std::wstring temp=g_stats.tempOk ? formatText(L"%u\u00B0C",g_stats.temp) : L"N/A";
+        std::wstring power=g_stats.watts>=0 ? formatText(L"%.1fW",g_stats.watts) : L"N/A";
+        std::wstring pstate=g_stats.pstateOk ? formatText(L"P%u",g_stats.pstate) : L"P?";
+        g_expandedLines[0]=formatText(
+            L"GPU    %s        Temperature    %s        Power    %s        %s",
+            gpu.c_str(),temp.c_str(),power.c_str(),pstate.c_str());
+
+        if(g_stats.memoryOk) {
+            g_expandedLines[1]=formatText(
+                L"VRAM    %.2f / %.2f GB        Fill    %u%%",
+                g_stats.used/1073741824.0,g_stats.total/1073741824.0,decision.vram);
+        } else {
+            g_expandedLines[1]=L"VRAM    N/A        Fill    N/A";
+        }
+    } else {
+        g_expandedLines[0]=g_nvml.ready
+            ? L"GPU readings temporarily unavailable; retrying every second."
+            : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.";
+    }
+
+    std::wstring cooling=g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable";
+    if(g_fans.ok) {
+        g_expandedLines[2]=formatText(
+            L"Cooling    %s        Fan 1    %lu RPM        Fan 2    %lu RPM",
+            cooling.c_str(),g_fans.fan1,g_fans.fan2);
+    } else {
+        g_expandedLines[2]=formatText(L"Cooling    %s",cooling.c_str());
+    }
 }
 
 void requestFanMode(HWND hwnd,DWORD mode) {
@@ -524,8 +565,7 @@ void paint(HWND hwnd) {
     PAINTSTRUCT ps{};
     HDC dc=BeginPaint(hwnd,&ps);
     RECT rc{}; GetClientRect(hwnd,&rc);
-    HBRUSH bg=CreateSolidBrush(RGB(18,18,20));
-    FillRect(dc,&rc,bg); DeleteObject(bg);
+    FillRect(dc,&rc,g_backgroundBrush);
 
     LoadDecision decision=assessLoad(g_stats);
     ULONGLONG now=GetTickCount64();
@@ -548,7 +588,7 @@ void paint(HWND hwnd) {
 
     SetTextColor(dc,RGB(242,242,245));
     SelectObject(dc,g_metricsFont);
-    auto parts=compactSegments();
+    const auto& parts=g_compactParts;
     std::array<SIZE,8> sizes{};
     int totalWidth=0;
     int activeSegments=0;
@@ -586,31 +626,11 @@ void paint(HWND hwnd) {
     if(g_expanded) {
         SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
-        std::wstringstream a,b,c;
-        if(g_stats.ok) {
-            a << L"GPU    " << (g_stats.utilOk ? std::to_wstring(decision.gpu)+L"%" : L"N/A")
-              << L"        Temperature    " << (g_stats.tempOk ? std::to_wstring(g_stats.temp)+L"\u00B0C" : L"N/A")
-              << L"        Power    ";
-            if(g_stats.watts>=0) a << std::fixed << std::setprecision(1) << g_stats.watts << L"W";
-            else a << L"N/A";
-            a << L"        " << (g_stats.pstateOk ? L"P"+std::to_wstring(g_stats.pstate) : L"P?");
-            b << L"VRAM    " << std::fixed << std::setprecision(2);
-            if(g_stats.memoryOk) b << g_stats.used/1073741824.0 << L" / " << g_stats.total/1073741824.0 << L" GB";
-            else b << L"N/A";
-            b << L"        Fill    " << decision.vram << L"%";
-            c << L"Cooling    " << (g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable")
-              << L"        Fan 1    " << (g_fans.ok ? std::to_wstring(g_fans.fan1)+L" RPM" : L"N/A")
-              << L"        Fan 2    " << (g_fans.ok ? std::to_wstring(g_fans.fan2)+L" RPM" : L"N/A");
-        } else {
-            a << (g_nvml.ready ? L"GPU readings temporarily unavailable; retrying every second."
-                              : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.");
-            c << L"Cooling    " << (g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable");
-        }
         RECT r1={16,45,rc.right-16,72}, r2={16,72,rc.right-16,99};
         RECT r3={16,99,rc.right-16,124};
-        DrawTextW(dc,a.str().c_str(),-1,&r1,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        DrawTextW(dc,b.str().c_str(),-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        DrawTextW(dc,c.str().c_str(),-1,&r3,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        DrawTextW(dc,g_expandedLines[0].c_str(),-1,&r1,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        DrawTextW(dc,g_expandedLines[1].c_str(),-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        DrawTextW(dc,g_expandedLines[2].c_str(),-1,&r3,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
     }
     EndPaint(hwnd,&ps);
 }
@@ -619,7 +639,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     switch(msg) {
     case WM_CREATE:
         SetTimer(hwnd,STATS_TIMER_ID,1000,nullptr);
-        SetTimer(hwnd,ANIMATION_TIMER_ID,50,nullptr);
+        SetTimer(hwnd,ANIMATION_TIMER_ID,ANIMATION_INTERVAL_MS,nullptr);
         g_hotkeyChoice=loadHotkeyChoice();
         registerToggleHotkey(hwnd,g_hotkeyChoice);
         g_fanHotkeyRegistered=RegisterHotKey(
@@ -628,6 +648,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     case WM_TIMER:
         if(wp==STATS_TIMER_ID) {
             updateStats();
+            refreshDisplayCache();
             InvalidateRect(hwnd,nullptr,FALSE);
         } else if(wp==ANIMATION_TIMER_ID) {
             InvalidateRect(hwnd,nullptr,FALSE);
@@ -637,6 +658,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
                 g_hoverConsumed=true;
                 g_hoverHidden=true;
                 g_trackingMouse=false;
+                stopAnimation(hwnd);
                 ShowWindow(hwnd,SW_HIDE);
                 SetTimer(hwnd,RESHOW_TIMER_ID,5000,nullptr);
             }
@@ -731,6 +753,10 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         return 0;
     }
     case WM_COMMAND:
+        if(LOWORD(wp)>=200 && LOWORD(wp)<=202) {
+            requestFanMode(hwnd,static_cast<DWORD>(LOWORD(wp)-200));
+            return 0;
+        }
         if(LOWORD(wp)==5) {
             showAbout(hwnd);
             return 0;
@@ -753,6 +779,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     g_nvml.load();
     updateStats();
+    refreshDisplayCache();
 
     g_font=CreateFontW(-16,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
@@ -761,6 +788,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     g_smallFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
     g_nvidiaLogo=LoadBitmapW(h,MAKEINTRESOURCEW(IDB_NVIDIA_LOGO));
+    g_backgroundBrush=CreateSolidBrush(RGB(18,18,20));
 
     WNDCLASSEXW wc{sizeof(wc)};
     wc.style=CS_HREDRAW|CS_VREDRAW|CS_DBLCLKS;
@@ -784,5 +812,6 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
     DeleteObject(g_font); DeleteObject(g_metricsFont); DeleteObject(g_smallFont);
     if(g_nvidiaLogo) DeleteObject(g_nvidiaLogo);
+    if(g_backgroundBrush) DeleteObject(g_backgroundBrush);
     return 0;
 }

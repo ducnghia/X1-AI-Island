@@ -1,8 +1,8 @@
-# X1 AI Island v0.2
+# X1 AI Island v1.0
 
 A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RTX 3080 Laptop GPU use case.
 
-## What v0.2 shows
+## What v1.0 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -14,7 +14,7 @@ A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RT
   - NVIDIA-green breathing pulse below 50%
   - yellow-dominant RGB pulse from 50% through 79%
   - red-biased RGB breathing pulse from 80% upward
-- GPU wins ties; expanded view identifies whether GPU load or VRAM fill is driving the border
+- GPU wins ties when GPU load and VRAM fill are equal
 - The `RTX 3080` text is fixed NVIDIA green below 50% GPU load, then uses the yellow/red warning animations based only on GPU load
 - Embedded NVIDIA logo image
 
@@ -72,6 +72,8 @@ Recommended:
   shortcut, view About information, or exit.
 - The Island uses 82% window opacity to soften the dark background while
   keeping compact telemetry and the animated border easy to read.
+- Animation runs at a lightweight 10 FPS and pauses while the Island is hidden.
+- Telemetry text is cached and rebuilt only when the one-second readings update.
 - Expanded view is intentionally concise: GPU status, VRAM use, fan mode, and
   both fan RPM values. It omits duplicate border and memory-engine details.
 - Hover for one second: hide the Island for five seconds so content beneath it can be seen, then return automatically.
@@ -81,11 +83,8 @@ Recommended:
 
 Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperature, and power.
 
-## v0.2 candidates
+## Version
 
-- CPU + RAM + battery
-- tray icon and Start with Windows
-- selectable NVIDIA device
-- compact/LLM layouts
-- hide when fullscreen
-- position persistence
+Version **1.0** is the feature-complete baseline. It favors a compact,
+dependency-free Win32 design over adding general-purpose system-monitor
+features to the Island.

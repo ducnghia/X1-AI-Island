@@ -52,5 +52,9 @@ int main() {
     assert(compactMetrics().find(L"COOL")!=std::wstring::npos);
     g_fans.mode=X1_FAN_MODE_AGGRESSIVE;
     assert(compactMetrics().find(L"AGGR")!=std::wstring::npos);
+    refreshDisplayCache();
+    assert(g_compactParts[5]==L"AGGR");
+    assert(g_expandedLines[0].find(L"Temperature")!=std::wstring::npos);
+    assert(ANIMATION_INTERVAL_MS==100);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }

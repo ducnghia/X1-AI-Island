@@ -17,13 +17,13 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE x1_ai_island.cpp x1_ai_island.res /link /SUBSYSTEM:WINDOWS /OUT:X1-AI-Island.exe
+cl /nologo /std:c++17 /O2 /GL /Gy /Gw /EHsc /DUNICODE /D_UNICODE x1_ai_island.cpp x1_ai_island.res /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /OUT:X1-AI-Island.exe
 if errorlevel 1 (
   echo BUILD FAILED
   pause
   exit /b 1
 )
-cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE x1_fan_service.cpp /link /SUBSYSTEM:WINDOWS /OUT:X1FanService.exe
+cl /nologo /std:c++17 /O2 /GL /Gy /Gw /EHsc /DUNICODE /D_UNICODE x1_fan_service.cpp /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS /OUT:X1FanService.exe
 if errorlevel 1 (
   echo FAN SERVICE BUILD FAILED
   pause
