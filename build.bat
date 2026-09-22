@@ -23,7 +23,15 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE x1_fan_service.cpp /link /SUBSYSTEM:CONSOLE /OUT:X1FanService.exe
+if errorlevel 1 (
+  echo FAN SERVICE BUILD FAILED
+  pause
+  exit /b 1
+)
 echo.
-echo Built successfully: %CD%\X1-AI-Island.exe
+echo Built successfully:
+echo   %CD%\X1-AI-Island.exe
+echo   %CD%\X1FanService.exe
 echo.
 pause

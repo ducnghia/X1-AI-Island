@@ -10,6 +10,7 @@ A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RT
 - GPU power draw when the driver exposes it
 - NVIDIA memory-engine utilization in expanded view
 - NVIDIA performance state (`P0` through `P8` when exposed by the driver)
+- Fan 1 and Fan 2 RPM in expanded view through the read-only `X1FanService`
 - A thin rounded status border driven by the higher of VRAM usage or dGPU load:
   - NVIDIA-green breathing pulse below 50%
   - yellow-dominant RGB pulse from 50% through 79%
@@ -24,7 +25,23 @@ It deliberately queries NVIDIA telemetry through `nvml.dll` instead of treating 
 
 The UI is plain Win32/GDI. It does not create a Direct3D rendering context on the RTX just to draw the overlay. NVIDIA is queried only for telemetry.
 
-No CUDA Toolkit, Python, .NET, Electron, LibreHardwareMonitor, installer, or Windows service is required. `nvml.dll` normally comes with the NVIDIA display driver.
+No CUDA Toolkit, Python, .NET, Electron, or LibreHardwareMonitor is required. `nvml.dll` normally comes with the NVIDIA display driver.
+
+## Fan telemetry service
+
+`X1FanService.exe` is a read-only LocalSystem service for the ThinkPad X1
+Extreme Gen 4 machine type `20Y6`. It reads the two fan tachometers through
+the open-source PawnIO driver and publishes only RPM telemetry to a read-only
+shared-memory block consumed by the Island.
+
+- It never writes the fan-control register.
+- It never changes the BIOS fan mode or fan curve.
+- It restores the fan selector to Fan 1 after each sample.
+- Missing service/driver data appears as `N/A`; the Island continues normally.
+
+Install PawnIO 2.2.0 first, build the project, then run
+`install_fan_service.bat` as Administrator. Use
+`uninstall_fan_service.bat` to remove only X1FanService.
 
 ## Build
 
@@ -33,7 +50,8 @@ Recommended:
 2. Open **x64 Native Tools Command Prompt for VS 2022**.
 3. `cd` into this folder.
 4. Run `build.bat`.
-5. Run `X1-AI-Island.exe`.
+5. Optionally install the fan service.
+6. Run `X1-AI-Island.exe`.
 
 ## Controls
 

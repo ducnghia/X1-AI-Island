@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include "resource.h"
+#include "fan_telemetry.h"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -110,6 +111,42 @@ struct Stats {
     bool utilOk = false, memoryOk = false, tempOk = false, pstateOk = false;
     bool ok = false;
 } g_stats;
+
+struct FanStats {
+    DWORD fan1=0, fan2=0, status=X1_FAN_STARTING;
+    bool ok=false;
+} g_fans;
+
+struct FanTelemetryReader {
+    HANDLE mapping{};
+    const X1FanTelemetry* view{};
+    void update() {
+        if(!view) {
+            mapping=OpenFileMappingW(FILE_MAP_READ,FALSE,X1_FAN_MAPPING_NAME);
+            if(mapping) view=static_cast<const X1FanTelemetry*>(
+                MapViewOfFile(mapping,FILE_MAP_READ,0,0,sizeof(X1FanTelemetry)));
+        }
+        g_fans={};
+        if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION) return;
+        X1FanTelemetry copy{};
+        for(int tries=0;tries<3;tries++) {
+            LONG before=view->sequence;
+            if(before&1) continue;
+            MemoryBarrier();
+            copy=*view;
+            MemoryBarrier();
+            if(before==view->sequence) break;
+        }
+        g_fans.status=copy.status;
+        g_fans.fan1=copy.fan1Rpm;
+        g_fans.fan2=copy.fan2Rpm;
+        g_fans.ok=copy.status==X1_FAN_OK && GetTickCount64()-copy.updatedTick<5000;
+    }
+    ~FanTelemetryReader() {
+        if(view) UnmapViewOfFile(view);
+        if(mapping) CloseHandle(mapping);
+    }
+} g_fanReader;
 
 HWND g_hwnd{};
 HFONT g_font{}, g_metricsFont{}, g_smallFont{};
@@ -327,6 +364,7 @@ void updateStats() {
         s.ok = s.utilOk || s.memoryOk || s.tempOk || s.watts>=0 || s.pstateOk;
     }
     g_stats=s;
+    g_fanReader.update();
 }
 
 std::wstring widen(const std::string& s) {
@@ -339,7 +377,7 @@ std::wstring widen(const std::string& s) {
 
 void setWindowSize() {
     int w = g_expanded ? 520 : 416;
-    int h = g_expanded ? 134 : 46;
+    int h = g_expanded ? 160 : 46;
     RECT r{}; GetWindowRect(g_hwnd,&r);
     SetWindowPos(g_hwnd,HWND_TOPMOST,r.left,r.top,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     HRGN region=CreateRoundRectRgn(0,0,w+1,h+1,24,24);
@@ -444,7 +482,7 @@ void paint(HWND hwnd) {
     if(g_expanded) {
         SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
-        std::wstringstream a,b,c;
+        std::wstringstream a,b,c,d;
         if(g_stats.ok) {
             a << L"GPU load    " << (g_stats.utilOk ? std::to_wstring(decision.gpu)+L"%" : L"N/A")
               << L"        VRAM fill    " << (g_stats.memoryOk ? std::to_wstring(decision.vram)+L"%" : L"N/A")
@@ -456,16 +494,19 @@ void paint(HWND hwnd) {
             b << L"        " << (g_stats.pstateOk ? L"P"+std::to_wstring(g_stats.pstate) : L"P?");
             c << L"Temperature    " << (g_stats.tempOk ? std::to_wstring(g_stats.temp)+L"\u00B0C" : L"N/A");
             if(g_stats.watts>=0) c << L"        Power    " << std::fixed << std::setprecision(1) << g_stats.watts << L"W";
+            d << L"Fan 1    " << (g_fans.ok ? std::to_wstring(g_fans.fan1)+L" RPM" : L"N/A")
+              << L"        Fan 2    " << (g_fans.ok ? std::to_wstring(g_fans.fan2)+L" RPM" : L"N/A");
         } else {
             a << (g_nvml.ready ? L"GPU readings temporarily unavailable; retrying every second."
                               : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.");
             b << L"N/A means the driver did not provide that reading.";
         }
         RECT r1={16,45,rc.right-16,72}, r2={16,72,rc.right-16,100};
-        RECT r3={16,100,rc.right-16,128};
+        RECT r3={16,100,rc.right-16,128}, r4={16,128,rc.right-16,154};
         DrawTextW(dc,a.str().c_str(),-1,&r1,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
         DrawTextW(dc,b.str().c_str(),-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
         DrawTextW(dc,c.str().c_str(),-1,&r3,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        DrawTextW(dc,d.str().c_str(),-1,&r4,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
     }
     EndPaint(hwnd,&ps);
 }
