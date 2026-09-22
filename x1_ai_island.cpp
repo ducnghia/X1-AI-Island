@@ -169,12 +169,14 @@ bool g_contextOpen=false;
 bool g_userHidden=false;
 bool g_hoverHidden=false;
 bool g_hotkeyRegistered=false;
+bool g_fanHotkeyRegistered=false;
 int g_hotkeyChoice=0;
 const UINT_PTR STATS_TIMER_ID=1;
 const UINT_PTR HOVER_TIMER_ID=2;
 const UINT_PTR RESHOW_TIMER_ID=3;
 const UINT_PTR ANIMATION_TIMER_ID=4;
 const int HOTKEY_ID=1;
+const int FAN_HOTKEY_ID=2;
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 
 enum class LoadLevel { Green, Yellow, Red };
@@ -399,8 +401,8 @@ void setWindowSize() {
     SetWindowRgn(g_hwnd,region,TRUE);
 }
 
-std::array<std::wstring,7> compactSegments() {
-    std::array<std::wstring,7> parts{};
+std::array<std::wstring,8> compactSegments() {
+    std::array<std::wstring,8> parts{};
     parts[0]=g_stats.utilOk ? std::to_wstring(g_stats.gpu)+L"%" : L"N/A";
     if(g_stats.memoryOk) {
         std::wstringstream vram;
@@ -425,8 +427,10 @@ std::array<std::wstring,7> compactSegments() {
     } else {
         parts[4]=L"--W";
     }
-    parts[5]=g_fans.ok ? L"F1 "+std::to_wstring(g_fans.fan1) : L"F1 --";
-    parts[6]=g_fans.ok ? L"F2 "+std::to_wstring(g_fans.fan2) : L"F2 --";
+    if(g_fans.ok && g_fans.mode==X1_FAN_MODE_COOL) parts[5]=L"COOL";
+    if(g_fans.ok && g_fans.mode==X1_FAN_MODE_AGGRESSIVE) parts[5]=L"AGGR";
+    parts[6]=g_fans.ok ? L"F1 "+std::to_wstring(g_fans.fan1) : L"F1 --";
+    parts[7]=g_fans.ok ? L"F2 "+std::to_wstring(g_fans.fan2) : L"F2 --";
     return parts;
 }
 
@@ -434,10 +438,36 @@ std::wstring compactMetrics() {
     auto parts=compactSegments();
     std::wstringstream ss;
     for(size_t i=0;i<parts.size();++i) {
-        if(i) ss << L" ";
+        if(parts[i].empty()) continue;
+        if(ss.tellp()>0) ss << L" ";
         ss << parts[i];
     }
     return ss.str();
+}
+
+void requestFanMode(HWND hwnd,DWORD mode) {
+    if(!g_fanReader.requestMode(mode))
+        MessageBoxW(hwnd,L"X1FanService is unavailable.",L"X1 AI Island",
+                    MB_OK|MB_ICONERROR);
+}
+
+void showFanModeMenu(HWND hwnd) {
+    cancelHover(hwnd);
+    HMENU menu=CreatePopupMenu();
+    AppendMenuW(menu,MF_STRING,200,L"BIOS Auto (default)");
+    AppendMenuW(menu,MF_STRING,201,L"Cool");
+    AppendMenuW(menu,MF_STRING,202,L"Aggressive");
+    CheckMenuRadioItem(menu,200,202,200+(std::min)(g_fans.mode,DWORD{2}),MF_BYCOMMAND);
+
+    RECT r{}; GetWindowRect(hwnd,&r);
+    POINT p{r.left+(r.right-r.left)/2,r.bottom};
+    SetForegroundWindow(hwnd);
+    g_contextOpen=true;
+    int cmd=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,hwnd,nullptr);
+    g_contextOpen=false;
+    DestroyMenu(menu);
+    PostMessageW(hwnd,WM_NULL,0,0);
+    if(cmd>=200 && cmd<=202) requestFanMode(hwnd,static_cast<DWORD>(cmd-200));
 }
 
 void drawNvidiaLogo(HDC dc,int x,int y) {
@@ -478,22 +508,38 @@ void paint(HWND hwnd) {
     SetTextColor(dc,RGB(242,242,245));
     SelectObject(dc,g_metricsFont);
     auto parts=compactSegments();
-    std::array<SIZE,7> sizes{};
+    std::array<SIZE,8> sizes{};
     int totalWidth=0;
+    int activeSegments=0;
     for(size_t i=0;i<parts.size();++i) {
+        if(parts[i].empty()) continue;
         GetTextExtentPoint32W(dc,parts[i].c_str(),static_cast<int>(parts[i].size()),&sizes[i]);
         totalWidth+=sizes[i].cx;
+        activeSegments++;
     }
     const int left=126;
     const int right=rc.right-4;
     int extra=(std::max)(0,right-left-totalWidth);
-    int gap=extra/6;
-    int remainder=extra%6;
+    int gapCount=(std::max)(1,activeSegments-1);
+    int gap=extra/gapCount;
+    int remainder=extra%gapCount;
     int x=left;
+    int drawn=0;
     for(size_t i=0;i<parts.size();++i) {
+        if(parts[i].empty()) continue;
+        if(i==5 && g_fans.mode==X1_FAN_MODE_COOL) {
+            SetTextColor(dc,NVIDIA_GREEN);
+        } else if(i==5 && g_fans.mode==X1_FAN_MODE_AGGRESSIVE) {
+            LoadLevel badgeLevel=decision.level==LoadLevel::Red ? LoadLevel::Red : LoadLevel::Yellow;
+            SetTextColor(dc,animatedBorderColor(badgeLevel,now));
+        } else {
+            SetTextColor(dc,RGB(242,242,245));
+        }
         int y=(46-sizes[i].cy)/2;
         TextOutW(dc,x,y,parts[i].c_str(),static_cast<int>(parts[i].size()));
-        if(i+1<parts.size()) x+=sizes[i].cx+gap+(static_cast<int>(i)<remainder?1:0);
+        drawn++;
+        if(drawn<activeSegments)
+            x+=sizes[i].cx+gap+(drawn<=remainder?1:0);
     }
 
     if(g_expanded) {
@@ -535,6 +581,8 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         SetTimer(hwnd,ANIMATION_TIMER_ID,50,nullptr);
         g_hotkeyChoice=loadHotkeyChoice();
         registerToggleHotkey(hwnd,g_hotkeyChoice);
+        g_fanHotkeyRegistered=RegisterHotKey(
+            hwnd,FAN_HOTKEY_ID,MOD_CONTROL|MOD_SHIFT|MOD_NOREPEAT,'F')!=FALSE;
         return 0;
     case WM_TIMER:
         if(wp==STATS_TIMER_ID) {
@@ -567,6 +615,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         return 0;
     case WM_HOTKEY:
         if(wp==HOTKEY_ID) toggleIsland(hwnd);
+        if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
         return 0;
     case WM_LBUTTONDBLCLK:
         g_expanded=!g_expanded; setWindowSize(); return 0;
@@ -604,8 +653,12 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         AppendMenuW(fanModes,MF_STRING,201,L"Cool");
         AppendMenuW(fanModes,MF_STRING,202,L"Aggressive");
         CheckMenuRadioItem(fanModes,200,202,200+(std::min)(g_fans.mode,DWORD{2}),MF_BYCOMMAND);
-        std::wstring fanLabel=L"Fan Control\t";
-        fanLabel+=g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable";
+        std::wstring fanLabel=L"Fan Control";
+        if(g_fans.ok) {
+            fanLabel+=L" — ";
+            fanLabel+=fanModeName(g_fans.mode);
+        }
+        fanLabel+=L"\tCtrl+Shift+F";
         AppendMenuW(m,MF_POPUP|(g_fans.ok?0:MF_GRAYED),
                     reinterpret_cast<UINT_PTR>(fanModes),fanLabel.c_str());
         std::wstring hideLabel=L"Hide Island\t";
@@ -627,9 +680,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         DestroyMenu(m);
         if(cmd==1){g_expanded=!g_expanded;setWindowSize();}
         if(cmd>=200 && cmd<=202) {
-            if(!g_fanReader.requestMode(static_cast<DWORD>(cmd-200)))
-                MessageBoxW(hwnd,L"X1FanService is unavailable.",L"X1 AI Island",
-                            MB_OK|MB_ICONERROR);
+            requestFanMode(hwnd,static_cast<DWORD>(cmd-200));
         }
         if(cmd==3)toggleIsland(hwnd);
         if(cmd>=100 && cmd<100+static_cast<int>(ARRAYSIZE(HOTKEYS))) selectHotkey(hwnd,cmd-100);
@@ -643,6 +694,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         KillTimer(hwnd,RESHOW_TIMER_ID);
         KillTimer(hwnd,ANIMATION_TIMER_ID);
         if(g_hotkeyRegistered) UnregisterHotKey(hwnd,HOTKEY_ID);
+        if(g_fanHotkeyRegistered) UnregisterHotKey(hwnd,FAN_HOTKEY_ID);
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,msg,wp,lp);

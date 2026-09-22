@@ -47,6 +47,11 @@ Install PawnIO 2.2.0 first, build the project, then run
 Run `X1FanService.exe` normally, or use the **Fan Control** submenu in the
 Island's right-click menu, to choose BIOS Auto, Cool, or Aggressive directly.
 
+Press **Ctrl+Shift+F** to open the Fan Control submenu directly, then use the
+arrow keys and Enter. Compact mode stays unchanged in BIOS Auto, shows a fixed
+NVIDIA-green `COOL` badge in Cool mode, and shows an animated yellow/red
+`AGGR` badge in Aggressive mode.
+
 ## Build
 
 Recommended:

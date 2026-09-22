@@ -47,5 +47,10 @@ int main() {
     assert(text.find(L"P8")!=std::wstring::npos);
     assert(text.find(L"F1 3816")!=std::wstring::npos);
     assert(text.find(L"F2 3540")!=std::wstring::npos);
+    assert(text.find(L"COOL")==std::wstring::npos);
+    g_fans.mode=X1_FAN_MODE_COOL;
+    assert(compactMetrics().find(L"COOL")!=std::wstring::npos);
+    g_fans.mode=X1_FAN_MODE_AGGRESSIVE;
+    assert(compactMetrics().find(L"AGGR")!=std::wstring::npos);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }
