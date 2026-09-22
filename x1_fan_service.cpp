@@ -171,10 +171,17 @@ void runWorker() {
     PawnEc ec;
     DWORD opened=ec.open();
     if(opened!=X1_FAN_OK) { publish(opened,0,0,GetLastError()); return; }
+    unsigned consecutiveFailures=0;
     while(WaitForSingleObject(g_stopEvent,1000)==WAIT_TIMEOUT) {
         DWORD f1=0,f2=0;
-        if(ec.sample(f1,f2)) publish(X1_FAN_OK,f1,f2);
-        else publish(X1_FAN_EC_UNAVAILABLE,0,0,GetLastError());
+        if(ec.sample(f1,f2)) {
+            consecutiveFailures=0;
+            publish(X1_FAN_OK,f1,f2);
+        } else if(++consecutiveFailures>=3) {
+            // Lenovo firmware and other well-behaved EC clients can briefly
+            // own the controller. Do not flash N/A for a single missed pass.
+            publish(X1_FAN_EC_UNAVAILABLE,0,0,GetLastError());
+        }
     }
 }
 
