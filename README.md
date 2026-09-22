@@ -10,7 +10,7 @@ A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RT
 - GPU power draw when the driver exposes it
 - NVIDIA memory-engine utilization in expanded view
 - NVIDIA performance state (`P0` through `P8` when exposed by the driver)
-- Fan 1 and Fan 2 RPM in expanded view through the read-only `X1FanService`
+- Fan 1 and Fan 2 RPM in both compact and expanded views through the read-only `X1FanService`
 - A thin rounded status border driven by the higher of VRAM usage or dGPU load:
   - NVIDIA-green breathing pulse below 50%
   - yellow-dominant RGB pulse from 50% through 79%

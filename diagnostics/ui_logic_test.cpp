@@ -39,10 +39,13 @@ int main() {
     g_nvml.ready=true; g_stats=s; g_stats.ok=true; g_stats.tempOk=true; g_stats.temp=61;
     g_stats.utilOk=true; g_stats.gpu=70;
     g_stats.pstateOk=true; g_stats.pstate=8; g_stats.watts=28; g_stats.total=16ULL<<30; g_stats.used=2ULL<<30;
+    g_fans.ok=true; g_fans.fan1=3816; g_fans.fan2=3540;
     auto text=compactMetrics();
     assert(text.find(L"GPU")==std::wstring::npos);
     assert(text.find(L"RAM")==std::wstring::npos);
     assert(text.find(L"2.0/16G")!=std::wstring::npos);
     assert(text.find(L"P8")!=std::wstring::npos);
+    assert(text.find(L"F1 3816")!=std::wstring::npos);
+    assert(text.find(L"F2 3540")!=std::wstring::npos);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }

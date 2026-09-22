@@ -376,7 +376,7 @@ std::wstring widen(const std::string& s) {
 }
 
 void setWindowSize() {
-    int w = g_expanded ? 520 : 416;
+    int w = 560;
     int h = g_expanded ? 160 : 46;
     RECT r{}; GetWindowRect(g_hwnd,&r);
     SetWindowPos(g_hwnd,HWND_TOPMOST,r.left,r.top,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
@@ -384,8 +384,8 @@ void setWindowSize() {
     SetWindowRgn(g_hwnd,region,TRUE);
 }
 
-std::array<std::wstring,5> compactSegments() {
-    std::array<std::wstring,5> parts{};
+std::array<std::wstring,7> compactSegments() {
+    std::array<std::wstring,7> parts{};
     parts[0]=g_stats.utilOk ? std::to_wstring(g_stats.gpu)+L"%" : L"N/A";
     if(g_stats.memoryOk) {
         std::wstringstream vram;
@@ -410,6 +410,8 @@ std::array<std::wstring,5> compactSegments() {
     } else {
         parts[4]=L"--W";
     }
+    parts[5]=g_fans.ok ? L"F1 "+std::to_wstring(g_fans.fan1) : L"F1 --";
+    parts[6]=g_fans.ok ? L"F2 "+std::to_wstring(g_fans.fan2) : L"F2 --";
     return parts;
 }
 
@@ -461,7 +463,7 @@ void paint(HWND hwnd) {
     SetTextColor(dc,RGB(242,242,245));
     SelectObject(dc,g_metricsFont);
     auto parts=compactSegments();
-    std::array<SIZE,5> sizes{};
+    std::array<SIZE,7> sizes{};
     int totalWidth=0;
     for(size_t i=0;i<parts.size();++i) {
         GetTextExtentPoint32W(dc,parts[i].c_str(),static_cast<int>(parts[i].size()),&sizes[i]);
@@ -470,8 +472,8 @@ void paint(HWND hwnd) {
     const int left=126;
     const int right=rc.right-4;
     int extra=(std::max)(0,right-left-totalWidth);
-    int gap=extra/4;
-    int remainder=extra%4;
+    int gap=extra/6;
+    int remainder=extra%6;
     int x=left;
     for(size_t i=0;i<parts.size();++i) {
         int y=(46-sizes[i].cy)/2;
@@ -637,7 +639,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     RegisterClassExW(&wc);
 
     int sw=GetSystemMetrics(SM_CXSCREEN);
-    const int initialWidth=416;
+    const int initialWidth=560;
     const int initialX=(std::max)(0,(sw-initialWidth)/2);
     g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
         wc.lpszClassName,L"X1 AI Island",WS_POPUP,
