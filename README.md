@@ -44,8 +44,8 @@ Install PawnIO 2.2.0 first, build the project, then run
 `install_fan_service.bat` as Administrator. Use
 `uninstall_fan_service.bat` to remove only X1FanService.
 
-Run `X1FanService.exe` normally, or select **Fan control** in the Island's
-right-click menu, to choose BIOS Auto, Cool, or Aggressive.
+Run `X1FanService.exe` normally, or use the **Fan Control** submenu in the
+Island's right-click menu, to choose BIOS Auto, Cool, or Aggressive directly.
 
 ## Build
 

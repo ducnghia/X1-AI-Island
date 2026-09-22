@@ -1,6 +1,5 @@
 #include <windows.h>
 #include <windowsx.h>
-#include <shellapi.h>
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -12,7 +11,6 @@
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "advapi32.lib")
 
 // X1 AI Island v0.1
@@ -121,12 +119,12 @@ struct FanStats {
 
 struct FanTelemetryReader {
     HANDLE mapping{};
-    const X1FanTelemetry* view{};
+    X1FanTelemetry* view{};
     void update() {
         if(!view) {
-            mapping=OpenFileMappingW(FILE_MAP_READ,FALSE,X1_FAN_MAPPING_NAME);
-            if(mapping) view=static_cast<const X1FanTelemetry*>(
-                MapViewOfFile(mapping,FILE_MAP_READ,0,0,sizeof(X1FanTelemetry)));
+            mapping=OpenFileMappingW(FILE_MAP_READ|FILE_MAP_WRITE,FALSE,X1_FAN_MAPPING_NAME);
+            if(mapping) view=static_cast<X1FanTelemetry*>(
+                MapViewOfFile(mapping,FILE_MAP_READ|FILE_MAP_WRITE,0,0,sizeof(X1FanTelemetry)));
         }
         g_fans={};
         if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION) return;
@@ -145,6 +143,13 @@ struct FanTelemetryReader {
         g_fans.mode=copy.activeMode;
         g_fans.hottestTemp=copy.hottestTempC;
         g_fans.ok=copy.status==X1_FAN_OK && GetTickCount64()-copy.updatedTick<5000;
+    }
+    bool requestMode(DWORD mode) {
+        if(!view) update();
+        if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION ||
+           mode>X1_FAN_MODE_AGGRESSIVE) return false;
+        InterlockedExchange(&view->requestedMode,static_cast<LONG>(mode));
+        return true;
     }
     ~FanTelemetryReader() {
         if(view) UnmapViewOfFile(view);
@@ -311,16 +316,6 @@ const wchar_t* fanModeName(DWORD mode) {
     if(mode==X1_FAN_MODE_COOL) return L"Cool";
     if(mode==X1_FAN_MODE_AGGRESSIVE) return L"Aggressive";
     return L"BIOS Auto";
-}
-
-void openFanControl(HWND hwnd) {
-    wchar_t path[MAX_PATH]{};
-    GetModuleFileNameW(nullptr,path,MAX_PATH);
-    wchar_t* slash=wcsrchr(path,L'\\');
-    if(slash) wcscpy_s(slash+1,MAX_PATH-(slash+1-path),L"X1FanService.exe");
-    if(reinterpret_cast<INT_PTR>(ShellExecuteW(hwnd,L"open",path,nullptr,nullptr,SW_SHOWNORMAL))<=32)
-        MessageBoxW(hwnd,L"X1FanService.exe could not be opened.",L"X1 AI Island",
-                    MB_OK|MB_ICONERROR);
 }
 
 BYTE channel(double value) {
@@ -602,11 +597,17 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     case WM_RBUTTONUP: {
         cancelHover(hwnd);
         HMENU m=CreatePopupMenu();
+        HMENU fanModes=CreatePopupMenu();
         HMENU shortcuts=CreatePopupMenu();
         AppendMenuW(m,MF_STRING,1,L"Expand / Collapse");
-        std::wstring fanLabel=L"Fan control...\t";
-        fanLabel+=fanModeName(g_fans.mode);
-        AppendMenuW(m,MF_STRING,4,fanLabel.c_str());
+        AppendMenuW(fanModes,MF_STRING,200,L"BIOS Auto (default)");
+        AppendMenuW(fanModes,MF_STRING,201,L"Cool");
+        AppendMenuW(fanModes,MF_STRING,202,L"Aggressive");
+        CheckMenuRadioItem(fanModes,200,202,200+(std::min)(g_fans.mode,DWORD{2}),MF_BYCOMMAND);
+        std::wstring fanLabel=L"Fan Control\t";
+        fanLabel+=g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable";
+        AppendMenuW(m,MF_POPUP|(g_fans.ok?0:MF_GRAYED),
+                    reinterpret_cast<UINT_PTR>(fanModes),fanLabel.c_str());
         std::wstring hideLabel=L"Hide Island\t";
         hideLabel+=HOTKEYS[g_hotkeyChoice].label;
         AppendMenuW(m,MF_STRING,3,hideLabel.c_str());
@@ -625,7 +626,11 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         g_contextOpen=false;
         DestroyMenu(m);
         if(cmd==1){g_expanded=!g_expanded;setWindowSize();}
-        if(cmd==4)openFanControl(hwnd);
+        if(cmd>=200 && cmd<=202) {
+            if(!g_fanReader.requestMode(static_cast<DWORD>(cmd-200)))
+                MessageBoxW(hwnd,L"X1FanService is unavailable.",L"X1 AI Island",
+                            MB_OK|MB_ICONERROR);
+        }
         if(cmd==3)toggleIsland(hwnd);
         if(cmd>=100 && cmd<100+static_cast<int>(ARRAYSIZE(HOTKEYS))) selectHotkey(hwnd,cmd-100);
         if(cmd==2)DestroyWindow(hwnd);
