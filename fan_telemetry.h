@@ -2,6 +2,7 @@
 #include <windows.h>
 
 constexpr wchar_t X1_FAN_MAPPING_NAME[] = L"Global\\X1FanTelemetryV1";
+constexpr wchar_t X1_FAN_COMMAND_EVENT_NAME[] = L"Global\\X1FanCommandV1";
 constexpr DWORD X1_FAN_MAGIC = 0x31463158; // "X1F1"
 constexpr DWORD X1_FAN_VERSION = 2;
 

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdarg>
+#include <cstring>
 #include <cmath>
 #include "resource.h"
 #include "fan_telemetry.h"
@@ -12,7 +13,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.0
+// X1 AI Island v1.0.4
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -47,12 +48,25 @@ struct NvmlApi {
     PFN_nvmlDeviceGetPowerUsage power{};
     PFN_nvmlDeviceGetPerformanceState performanceState{};
     nvmlDevice_t device{};
-    std::string deviceName = "NVIDIA GPU";
+    bool initialized = false;
     bool ready = false;
 
     template<class T> T sym(const char* n) { return reinterpret_cast<T>(GetProcAddress(dll, n)); }
 
+    void unload() {
+        if(initialized && shutdown) shutdown();
+        initialized=false;
+        ready=false;
+        device=nullptr;
+        if(dll) FreeLibrary(dll);
+        dll=nullptr;
+        init=nullptr; shutdown=nullptr; count=nullptr; handle=nullptr;
+        name=nullptr; util=nullptr; memory=nullptr; temp=nullptr;
+        power=nullptr; performanceState=nullptr;
+    }
+
     bool load() {
+        if(dll) return ready;
         const wchar_t* candidates[] = {
             L"nvml.dll",
             L"C:\\Windows\\System32\\nvml.dll",
@@ -70,10 +84,13 @@ struct NvmlApi {
         temp = sym<PFN_nvmlDeviceGetTemperature>("nvmlDeviceGetTemperature");
         power = sym<PFN_nvmlDeviceGetPowerUsage>("nvmlDeviceGetPowerUsage");
         performanceState = sym<PFN_nvmlDeviceGetPerformanceState>("nvmlDeviceGetPerformanceState");
-        if (!init || !count || !handle || !name || !util || !memory || !temp) return false;
-        if (init() != 0) return false;
+        if (!init || !count || !handle || !name || !util || !memory || !temp) {
+            unload(); return false;
+        }
+        if (init() != 0) { unload(); return false; }
+        initialized=true;
         unsigned int n = 0;
-        if (count(&n) != 0 || n == 0) return false;
+        if (count(&n) != 0 || n == 0) { unload(); return false; }
 
         // Prefer an RTX 3080 if present; otherwise first NVIDIA device.
         nvmlDevice_t first{};
@@ -83,25 +100,20 @@ struct NvmlApi {
             if (!first) first = d;
             char buf[128]{};
             if (name(d, buf, sizeof(buf)) == 0) {
-                std::string s(buf);
-                if (s.find("RTX 3080") != std::string::npos) {
-                    device = d; deviceName = s; break;
-                }
-                if (!device) { device = d; deviceName = s; }
+                if (strstr(buf,"RTX 3080")) { device=d; break; }
+                if (!device) device=d;
             }
         }
         if (!device) device = first;
         ready = device != nullptr;
+        if(!ready) unload();
         return ready;
     }
-    ~NvmlApi() {
-        if (ready && shutdown) shutdown();
-        if (dll) FreeLibrary(dll);
-    }
+    ~NvmlApi() { unload(); }
 } g_nvml;
 
 struct Stats {
-    unsigned gpu = 0, memUtil = 0, temp = 0;
+    unsigned gpu = 0, temp = 0;
     unsigned pstate = 0;
     unsigned long long used = 0, total = 0;
     double watts = -1;
@@ -112,12 +124,12 @@ struct Stats {
 struct FanStats {
     DWORD fan1=0, fan2=0, status=X1_FAN_STARTING;
     DWORD mode=X1_FAN_MODE_BIOS_AUTO;
-    LONG hottestTemp=-1;
     bool ok=false;
 } g_fans;
 
 struct FanTelemetryReader {
     HANDLE mapping{};
+    HANDLE commandEvent{};
     X1FanTelemetry* view{};
     void update() {
         if(!view) {
@@ -140,7 +152,6 @@ struct FanTelemetryReader {
         g_fans.fan1=copy.fan1Rpm;
         g_fans.fan2=copy.fan2Rpm;
         g_fans.mode=copy.activeMode;
-        g_fans.hottestTemp=copy.hottestTempC;
         g_fans.ok=copy.status==X1_FAN_OK && GetTickCount64()-copy.updatedTick<5000;
     }
     bool requestMode(DWORD mode) {
@@ -148,12 +159,18 @@ struct FanTelemetryReader {
         if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION ||
            mode>X1_FAN_MODE_AGGRESSIVE) return false;
         InterlockedExchange(&view->requestedMode,static_cast<LONG>(mode));
+        if(!commandEvent)
+            commandEvent=OpenEventW(EVENT_MODIFY_STATE,FALSE,X1_FAN_COMMAND_EVENT_NAME);
+        if(commandEvent) SetEvent(commandEvent);
         return true;
     }
-    ~FanTelemetryReader() {
+    void close() {
         if(view) UnmapViewOfFile(view);
         if(mapping) CloseHandle(mapping);
+        if(commandEvent) CloseHandle(commandEvent);
+        view=nullptr; mapping=nullptr; commandEvent=nullptr;
     }
+    ~FanTelemetryReader() { close(); }
 } g_fanReader;
 
 HWND g_hwnd{};
@@ -195,8 +212,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const UINT ANIMATION_INTERVAL_MS=100;
-const wchar_t APP_VERSION[]=L"1.0.3";
+const wchar_t APP_VERSION[]=L"1.0.4";
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -263,13 +279,50 @@ void selectHotkey(HWND hwnd,int choice) {
     }
 }
 
-void startAnimation(HWND hwnd) {
-    if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden)
-        SetTimer(hwnd,ANIMATION_TIMER_ID,ANIMATION_INTERVAL_MS,nullptr);
+void updateStats();
+void refreshDisplayCache();
+LoadLevel loadLevel(const Stats& s);
+
+bool runningOnBattery() {
+    SYSTEM_POWER_STATUS status{};
+    return GetSystemPowerStatus(&status) && status.ACLineStatus==0;
 }
 
-void stopAnimation(HWND hwnd) {
+UINT statsIntervalMs() {
+    return runningOnBattery() ? 2000U : 1000U;
+}
+
+UINT animationIntervalMs() {
+    const bool warning=loadLevel(g_stats)!=LoadLevel::Green;
+    if(runningOnBattery()) return warning ? 200U : 400U;
+    return warning ? 100U : 250U;
+}
+
+void startStats(HWND hwnd) {
+    if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden)
+        SetTimer(hwnd,STATS_TIMER_ID,statsIntervalMs(),nullptr);
+}
+
+void startAnimation(HWND hwnd) {
+    if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden)
+        SetTimer(hwnd,ANIMATION_TIMER_ID,animationIntervalMs(),nullptr);
+}
+
+void stopMonitoring(HWND hwnd) {
+    KillTimer(hwnd,STATS_TIMER_ID);
     KillTimer(hwnd,ANIMATION_TIMER_ID);
+}
+
+void refreshNow(HWND hwnd) {
+    updateStats();
+    refreshDisplayCache();
+    InvalidateRect(hwnd,nullptr,FALSE);
+}
+
+void rescheduleMonitoring(HWND hwnd) {
+    stopMonitoring(hwnd);
+    startStats(hwnd);
+    startAnimation(hwnd);
 }
 
 void showIsland(HWND hwnd) {
@@ -278,7 +331,8 @@ void showIsland(HWND hwnd) {
     KillTimer(hwnd,RESHOW_TIMER_ID);
     ShowWindow(hwnd,SW_SHOWNOACTIVATE);
     SetWindowPos(hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
-    startAnimation(hwnd);
+    refreshNow(hwnd);
+    rescheduleMonitoring(hwnd);
 }
 
 void toggleIsland(HWND hwnd) {
@@ -289,7 +343,7 @@ void toggleIsland(HWND hwnd) {
         g_hoverHidden=false;
         KillTimer(hwnd,HOVER_TIMER_ID);
         KillTimer(hwnd,RESHOW_TIMER_ID);
-        stopAnimation(hwnd);
+        stopMonitoring(hwnd);
         ShowWindow(hwnd,SW_HIDE);
     }
 }
@@ -461,7 +515,7 @@ void updateStats() {
         s.utilOk = g_nvml.util(g_nvml.device,&u)==0;
         s.memoryOk = g_nvml.memory(g_nvml.device,&m)==0;
         s.tempOk = g_nvml.temp(g_nvml.device,0,&t)==0;
-        if(s.utilOk) { s.gpu=u.gpu; s.memUtil=u.memory; }
+        if(s.utilOk) s.gpu=u.gpu;
         if(s.memoryOk) { s.used=m.used; s.total=m.total; }
         if(s.tempOk) s.temp=t;
         if (g_nvml.power && g_nvml.power(g_nvml.device,&p)==0) s.watts=p/1000.0;
@@ -695,8 +749,8 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         InvalidateRect(hwnd,nullptr,FALSE);
         return 0;
     case WM_CREATE:
-        SetTimer(hwnd,STATS_TIMER_ID,1000,nullptr);
-        SetTimer(hwnd,ANIMATION_TIMER_ID,ANIMATION_INTERVAL_MS,nullptr);
+        startStats(hwnd);
+        startAnimation(hwnd);
         g_hotkeyChoice=loadHotkeyChoice();
         registerToggleHotkey(hwnd,g_hotkeyChoice);
         g_fanHotkeyRegistered=RegisterHotKey(
@@ -707,6 +761,8 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             updateStats();
             refreshDisplayCache();
             InvalidateRect(hwnd,nullptr,FALSE);
+            SetTimer(hwnd,STATS_TIMER_ID,statsIntervalMs(),nullptr);
+            SetTimer(hwnd,ANIMATION_TIMER_ID,animationIntervalMs(),nullptr);
         } else if(wp==ANIMATION_TIMER_ID) {
             InvalidateRect(hwnd,nullptr,FALSE);
         } else if(wp==HOVER_TIMER_ID) {
@@ -715,7 +771,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
                 g_hoverConsumed=true;
                 g_hoverHidden=true;
                 g_trackingMouse=false;
-                stopAnimation(hwnd);
+                stopMonitoring(hwnd);
                 ShowWindow(hwnd,SW_HIDE);
                 SetTimer(hwnd,RESHOW_TIMER_ID,5000,nullptr);
             }
@@ -733,6 +789,14 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             }
         }
         return 0;
+    case WM_POWERBROADCAST:
+        if(wp==PBT_APMPOWERSTATUSCHANGE || wp==PBT_APMRESUMEAUTOMATIC) {
+            if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden) {
+                refreshNow(hwnd);
+                rescheduleMonitoring(hwnd);
+            }
+        }
+        return TRUE;
     case WM_HOTKEY:
         if(wp==HOTKEY_ID) toggleIsland(hwnd);
         if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
@@ -820,16 +884,39 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         }
         break;
     case WM_PAINT: paint(hwnd); return 0;
+    case WM_CLOSE:
+        g_fanReader.requestMode(X1_FAN_MODE_BIOS_AUTO);
+        DestroyWindow(hwnd);
+        return 0;
     case WM_DESTROY:
-        KillTimer(hwnd,STATS_TIMER_ID);
+        stopMonitoring(hwnd);
         KillTimer(hwnd,HOVER_TIMER_ID);
         KillTimer(hwnd,RESHOW_TIMER_ID);
-        KillTimer(hwnd,ANIMATION_TIMER_ID);
         if(g_hotkeyRegistered) UnregisterHotKey(hwnd,HOTKEY_ID);
         if(g_fanHotkeyRegistered) UnregisterHotKey(hwnd,FAN_HOTKEY_ID);
+        g_hotkeyRegistered=false;
+        g_fanHotkeyRegistered=false;
+        g_fanReader.requestMode(X1_FAN_MODE_BIOS_AUTO);
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,msg,wp,lp);
+}
+
+void cleanupApp() {
+    g_fanReader.close();
+    g_nvml.unload();
+    if(g_font) DeleteObject(g_font);
+    if(g_metricsFont) DeleteObject(g_metricsFont);
+    if(g_smallFont) DeleteObject(g_smallFont);
+    if(g_nvidiaLogo) DeleteObject(g_nvidiaLogo);
+    if(g_backgroundBrush) DeleteObject(g_backgroundBrush);
+    if(g_singleInstanceMutex) CloseHandle(g_singleInstanceMutex);
+    g_font=nullptr;
+    g_metricsFont=nullptr;
+    g_smallFont=nullptr;
+    g_nvidiaLogo=nullptr;
+    g_backgroundBrush=nullptr;
+    g_singleInstanceMutex=nullptr;
 }
 
 int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
@@ -865,7 +952,10 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     wc.style=CS_HREDRAW|CS_VREDRAW|CS_DBLCLKS;
     wc.lpfnWndProc=WndProc; wc.hInstance=h; wc.hCursor=LoadCursor(nullptr,IDC_ARROW);
     wc.lpszClassName=L"X1AIIslandClass";
-    RegisterClassExW(&wc);
+    if(!RegisterClassExW(&wc)) {
+        cleanupApp();
+        return 1;
+    }
 
     int sw=GetSystemMetrics(SM_CXSCREEN);
     const int initialWidth=560;
@@ -873,17 +963,18 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,
         wc.lpszClassName,L"X1 AI Island",WS_POPUP,
         initialX,18,initialWidth,46,nullptr,nullptr,h,nullptr);
-    if(!g_hwnd) return 1;
+    if(!g_hwnd) {
+        cleanupApp();
+        return 1;
+    }
     SetLayeredWindowAttributes(g_hwnd,0,ISLAND_OPACITY,LWA_ALPHA);
     setWindowSize();
     ShowWindow(g_hwnd,SW_SHOWNOACTIVATE);
     UpdateWindow(g_hwnd);
 
     MSG msg{};
-    while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
-    DeleteObject(g_font); DeleteObject(g_metricsFont); DeleteObject(g_smallFont);
-    if(g_nvidiaLogo) DeleteObject(g_nvidiaLogo);
-    if(g_backgroundBrush) DeleteObject(g_backgroundBrush);
-    if(g_singleInstanceMutex) CloseHandle(g_singleInstanceMutex);
-    return 0;
+    int result=0;
+    while((result=GetMessageW(&msg,nullptr,0,0))>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
+    cleanupApp();
+    return result<0 ? 1 : static_cast<int>(msg.wParam);
 }

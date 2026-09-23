@@ -11,7 +11,7 @@ FONT 9, "Segoe UI"
 BEGIN
     CONTROL         "",IDC_ABOUT_LOGO,"Static",
                     SS_BITMAP | SS_CENTERIMAGE,10,5,185,43
-    LTEXT           "X1 AI Island v1.0.3",IDC_ABOUT_VERSION,
+    LTEXT           "X1 AI Island v1.0.4",IDC_ABOUT_VERSION,
                     8,48,189,11,SS_CENTER
     LTEXT           "Local LLM AI Workstation Monitor",IDC_ABOUT_SUBTITLE,
                     8,61,189,10,SS_CENTER
@@ -23,8 +23,8 @@ BEGIN
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,3,0
- PRODUCTVERSION 1,0,3,0
+ FILEVERSION 1,0,4,0
+ PRODUCTVERSION 1,0,4,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -41,12 +41,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "3S Intersoft JSC"
             VALUE "FileDescription", "X1 AI Island"
-            VALUE "FileVersion", "1.0.3.0"
+            VALUE "FileVersion", "1.0.4.0"
             VALUE "InternalName", "X1-AI-Island"
             VALUE "LegalCopyright", "Developed with Codex and Curiosity"
             VALUE "OriginalFilename", "X1-AI-Island.exe"
             VALUE "ProductName", "X1 AI Island"
-            VALUE "ProductVersion", "1.0.3"
+            VALUE "ProductVersion", "1.0.4"
         END
     END
     BLOCK "VarFileInfo"

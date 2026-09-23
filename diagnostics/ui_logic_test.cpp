@@ -58,7 +58,11 @@ int main() {
     assert(g_expandedDisplay.temperature.find(L"Temperature")!=std::wstring::npos);
     assert(g_expandedDisplay.performanceState.find(L"Perf. State")!=std::wstring::npos);
     assert(g_expandedDisplay.cooling.find(L"Fan Mode")!=std::wstring::npos);
-    assert(ANIMATION_INTERVAL_MS==100);
+    g_stats.utilOk=true; g_stats.gpu=10; g_stats.memoryOk=true; g_stats.total=100; g_stats.used=10;
+    assert(animationIntervalMs()==(runningOnBattery()?400U:250U));
+    g_stats.gpu=90;
+    assert(animationIntervalMs()==(runningOnBattery()?200U:100U));
+    assert(statsIntervalMs()==(runningOnBattery()?2000U:1000U));
     assert(WM_SHOW_EXISTING_ISLAND>WM_APP);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }

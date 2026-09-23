@@ -1,8 +1,8 @@
-# X1 AI Island v1.0.3
+# X1 AI Island v1.0.4
 
 A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RTX 3080 Laptop GPU use case.
 
-## What v1.0.3 shows
+## What v1.0.4 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -37,6 +37,9 @@ through the open-source PawnIO driver and publishes telemetry to the Island.
 - **Aggressive** starts both fans earlier and at higher EC levels.
 - At high temperature, custom modes return control to BIOS.
 - Stop, shutdown, and normal service exit also return control to BIOS.
+- Closing the Island requests **BIOS Auto** immediately. The independent
+  Windows service remains available for the next launch, but polls less often
+  in BIOS Auto (especially on battery).
 - It restores the fan selector to Fan 1 after each sample.
 - Missing service/driver data appears as `N/A`; the Island continues normally.
 
@@ -72,8 +75,11 @@ Recommended:
   shortcut, view About information, or exit.
 - The Island uses 85% window opacity to soften the dark background while
   keeping compact telemetry and the animated border easy to read.
-- Animation runs at a lightweight 10 FPS and pauses while the Island is hidden.
+- Animation refresh is adaptive: warnings stay responsive while the normal
+  green state uses fewer wakeups, with a further reduction on battery.
 - Telemetry text is cached and rebuilt only when the one-second readings update.
+- Telemetry refresh changes from one second on AC to two seconds on battery.
+- Telemetry and animation timers stop completely while the Island is hidden.
 - Only one Island instance can run in the current Windows session. Launching it
   again restores the existing Island if hidden and brings it back to topmost.
 - Expanded view is intentionally concise: GPU status, VRAM use, fan mode, and
@@ -81,7 +87,8 @@ Recommended:
   `GPU Load` and `Performance State`. It omits duplicate border and
   memory-engine details.
 - Hover for one second: hide the Island for five seconds so content beneath it can be seen, then return automatically.
-- Refresh interval: 1 second.
+- All NVML, shared-memory, event, GDI, hotkey and mutex resources owned by the
+  Island are explicitly released on exit.
 
 ## Verify
 
@@ -89,6 +96,6 @@ Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperatur
 
 ## Version
 
-Version **1.0.3** adds single-instance behavior to the balanced three-row,
-three-column workstation dashboard. The centered, compact About dialog
-identifies the app as a `Local LLM AI Workstation Monitor`.
+Version **1.0.4** reduces timer wakeups and EC polling on battery, removes
+per-sample heap allocation from the fan service, explicitly releases owned
+resources, and returns fan control to BIOS Auto when the Island exits.

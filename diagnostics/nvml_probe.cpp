@@ -3,7 +3,7 @@
 int main() {
     puts("Loading NVML..."); fflush(stdout);
     bool loaded = g_nvml.load();
-    printf("loaded=%d device=%s\n", loaded, g_nvml.deviceName.c_str()); fflush(stdout);
+    printf("loaded=%d device=%p\n", loaded, g_nvml.device); fflush(stdout);
     if (loaded) for(int i=0; i<8; ++i) { Sleep(1000);
         nvmlUtilization_t u{}; nvmlMemory_t m{}; unsigned t=0,p=0;
         printf("util=%d\n", g_nvml.util(g_nvml.device,&u)); fflush(stdout);

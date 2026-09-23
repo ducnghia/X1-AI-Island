@@ -1,8 +1,7 @@
 #include <windows.h>
 #include <sddl.h>
 #include <string>
-#include <vector>
-#include <fstream>
+#include <cstring>
 #include "fan_telemetry.h"
 
 #pragma comment(lib, "advapi32.lib")
@@ -22,7 +21,7 @@ constexpr BYTE FAN_BIOS = 0x80;
 
 SERVICE_STATUS_HANDLE g_statusHandle{};
 SERVICE_STATUS g_serviceStatus{};
-HANDLE g_stopEvent{}, g_mapping{};
+HANDLE g_stopEvent{}, g_commandEvent{}, g_mapping{};
 X1FanTelemetry* g_shared{};
 bool g_consoleMode=false;
 
@@ -62,13 +61,15 @@ class PawnEc {
 
     bool execute(const char* name,const ULONGLONG* input,DWORD inputCount,
                  ULONGLONG* output,DWORD outputCount) {
-        std::vector<BYTE> packet(32+inputCount*sizeof(ULONGLONG),0);
+        if(inputCount>2) return false;
+        BYTE packet[32+2*sizeof(ULONGLONG)]{};
         size_t n=strlen(name);
         if(n>=32) return false;
-        memcpy(packet.data(),name,n);
-        if(inputCount) memcpy(packet.data()+32,input,inputCount*sizeof(ULONGLONG));
+        memcpy(packet,name,n);
+        if(inputCount) memcpy(packet+32,input,inputCount*sizeof(ULONGLONG));
         DWORD returned=0;
-        return DeviceIoControl(device_,IOCTL_EXECUTE_FN,packet.data(),static_cast<DWORD>(packet.size()),
+        return DeviceIoControl(device_,IOCTL_EXECUTE_FN,packet,
+            32+inputCount*sizeof(ULONGLONG),
             output,outputCount*sizeof(ULONGLONG),&returned,nullptr)!=FALSE;
     }
     bool readPort(WORD port,BYTE& value) {
@@ -122,12 +123,26 @@ public:
         if(device_==INVALID_HANDLE_VALUE) return X1_FAN_DRIVER_MISSING;
 
         std::wstring module=exeDirectory()+L"\\LpcACPIEC.bin";
-        std::ifstream file(module,std::ios::binary);
-        if(!file) return X1_FAN_MODULE_MISSING;
-        std::vector<char> blob((std::istreambuf_iterator<char>(file)),{});
+        HANDLE file=CreateFileW(module.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,
+                                OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file==INVALID_HANDLE_VALUE) return X1_FAN_MODULE_MISSING;
+        LARGE_INTEGER size{};
+        if(!GetFileSizeEx(file,&size) || size.QuadPart<=0 || size.QuadPart>16*1024*1024) {
+            CloseHandle(file);
+            SetLastError(ERROR_BAD_LENGTH);
+            return X1_FAN_EC_UNAVAILABLE;
+        }
+        DWORD blobSize=static_cast<DWORD>(size.QuadPart);
+        void* blob=HeapAlloc(GetProcessHeap(),0,blobSize);
+        DWORD read=0;
+        bool loaded=blob && ReadFile(file,blob,blobSize,&read,nullptr) && read==blobSize;
+        CloseHandle(file);
         DWORD returned=0;
-        if(blob.empty() || !DeviceIoControl(device_,IOCTL_LOAD_BINARY,blob.data(),
-                static_cast<DWORD>(blob.size()),nullptr,0,&returned,nullptr))
+        if(loaded)
+            loaded=DeviceIoControl(device_,IOCTL_LOAD_BINARY,blob,blobSize,
+                                   nullptr,0,&returned,nullptr)!=FALSE;
+        if(blob) HeapFree(GetProcessHeap(),0,blob);
+        if(!loaded)
             return X1_FAN_EC_UNAVAILABLE;
         mutex_=CreateMutexW(nullptr,FALSE,L"Global\\Access_EC");
         return mutex_ ? X1_FAN_OK : X1_FAN_EC_UNAVAILABLE;
@@ -208,8 +223,10 @@ bool createTelemetry() {
     const wchar_t* name=g_consoleMode ? L"Local\\X1FanTelemetryProbe" : X1_FAN_MAPPING_NAME;
     g_mapping=CreateFileMappingW(INVALID_HANDLE_VALUE,sd?&sa:nullptr,PAGE_READWRITE,0,
                                 sizeof(X1FanTelemetry),name);
+    g_commandEvent=CreateEventW(g_consoleMode ? nullptr : (sd?&sa:nullptr),FALSE,FALSE,
+                                g_consoleMode ? nullptr : X1_FAN_COMMAND_EVENT_NAME);
     if(sd) LocalFree(sd);
-    if(!g_mapping) return false;
+    if(!g_mapping || !g_commandEvent) return false;
     g_shared=static_cast<X1FanTelemetry*>(MapViewOfFile(g_mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(X1FanTelemetry)));
     if(!g_shared) return false;
     ZeroMemory(g_shared,sizeof(*g_shared));
@@ -219,6 +236,16 @@ bool createTelemetry() {
     g_shared->hottestTempC=-1;
     publish(X1_FAN_STARTING);
     return true;
+}
+
+bool runningOnBattery() {
+    SYSTEM_POWER_STATUS status{};
+    return GetSystemPowerStatus(&status) && status.ACLineStatus==0;
+}
+
+DWORD pollInterval(DWORD requestedMode) {
+    if(requestedMode!=X1_FAN_MODE_BIOS_AUTO) return 1000;
+    return runningOnBattery() ? 3000 : 2000;
 }
 
 void runWorker() {
@@ -239,7 +266,9 @@ void runWorker() {
     unsigned consecutiveFailures=0;
     DWORD activeMode=initialBios ? X1_FAN_MODE_BIOS_AUTO : 0xffffffff;
     BYTE appliedLevel=initialBios ? FAN_BIOS : 0xff;
-    while(WaitForSingleObject(g_stopEvent,1000)==WAIT_TIMEOUT) {
+    DWORD requested=X1_FAN_MODE_BIOS_AUTO;
+    HANDLE waits[]={g_stopEvent,g_commandEvent};
+    for(;;) {
         DWORD f1=0,f2=0;
         if(ec.sample(f1,f2)) {
             consecutiveFailures=0;
@@ -250,7 +279,7 @@ void runWorker() {
             publish(X1_FAN_EC_UNAVAILABLE,0,0,GetLastError());
         }
 
-        DWORD requested=static_cast<DWORD>(
+        requested=static_cast<DWORD>(
             InterlockedCompareExchange(&g_shared->requestedMode,0,0));
         if(requested>X1_FAN_MODE_AGGRESSIVE) requested=X1_FAN_MODE_BIOS_AUTO;
         LONG hottest=-1;
@@ -268,9 +297,24 @@ void runWorker() {
         }
         g_shared->activeMode=activeMode;
         g_shared->hottestTempC=hottest;
+
+        DWORD wait=WaitForMultipleObjects(ARRAYSIZE(waits),waits,FALSE,pollInterval(requested));
+        if(wait==WAIT_OBJECT_0) break;
+        if(wait!=WAIT_OBJECT_0+1 && wait!=WAIT_TIMEOUT) break;
     }
     ec.setFanLevel(FAN_BIOS);
     g_shared->activeMode=X1_FAN_MODE_BIOS_AUTO;
+}
+
+void cleanupServiceResources() {
+    if(g_shared) UnmapViewOfFile(g_shared);
+    if(g_mapping) CloseHandle(g_mapping);
+    if(g_commandEvent) CloseHandle(g_commandEvent);
+    if(g_stopEvent) CloseHandle(g_stopEvent);
+    g_shared=nullptr;
+    g_mapping=nullptr;
+    g_commandEvent=nullptr;
+    g_stopEvent=nullptr;
 }
 
 void setServiceState(DWORD state,DWORD error=NO_ERROR) {
@@ -293,6 +337,7 @@ void WINAPI serviceMain(DWORD,LPWSTR*) {
     g_stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     setServiceState(SERVICE_RUNNING);
     runWorker();
+    cleanupServiceResources();
     setServiceState(SERVICE_STOPPED);
 }
 
@@ -340,6 +385,11 @@ int showController() {
     }
     if(selected) {
         InterlockedExchange(&shared->requestedMode,requested);
+        HANDLE command=OpenEventW(EVENT_MODIFY_STATE,FALSE,X1_FAN_COMMAND_EVENT_NAME);
+        if(command) {
+            SetEvent(command);
+            CloseHandle(command);
+        }
         ULONGLONG deadline=GetTickCount64()+4000;
         while(GetTickCount64()<deadline && shared->activeMode!=requested) Sleep(100);
         std::wstring result=L"Requested mode: ";
@@ -364,7 +414,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int) {
         g_consoleMode=true;
         g_stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
         runWorker();
-        return g_shared && g_shared->status==X1_FAN_OK ? 0 : 1;
+        int result=g_shared && g_shared->status==X1_FAN_OK ? 0 : 1;
+        cleanupServiceResources();
+        return result;
     }
     SERVICE_TABLE_ENTRYW table[]={{const_cast<LPWSTR>(SERVICE_NAME),serviceMain},{nullptr,nullptr}};
     if(StartServiceCtrlDispatcherW(table)) return 0;
