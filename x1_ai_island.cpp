@@ -134,8 +134,14 @@ struct FanTelemetryReader {
     void update() {
         if(!view) {
             mapping=OpenFileMappingW(FILE_MAP_READ|FILE_MAP_WRITE,FALSE,X1_FAN_MAPPING_NAME);
-            if(mapping) view=static_cast<X1FanTelemetry*>(
-                MapViewOfFile(mapping,FILE_MAP_READ|FILE_MAP_WRITE,0,0,sizeof(X1FanTelemetry)));
+            if(mapping) {
+                view=static_cast<X1FanTelemetry*>(
+                    MapViewOfFile(mapping,FILE_MAP_READ|FILE_MAP_WRITE,0,0,sizeof(X1FanTelemetry)));
+                if(!view) {
+                    CloseHandle(mapping);
+                    mapping=nullptr;
+                }
+            }
         }
         g_fans={};
         if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION) return;
@@ -173,12 +179,26 @@ struct FanTelemetryReader {
     ~FanTelemetryReader() { close(); }
 } g_fanReader;
 
+enum class LoadLevel { Green, Yellow, Red };
+enum class LoadSource { GPU, VRAM, Unavailable };
+
+struct LoadDecision {
+    unsigned gpu=0;
+    unsigned vram=0;
+    unsigned effective=0;
+    LoadLevel level=LoadLevel::Green;
+    LoadSource source=LoadSource::Unavailable;
+};
+
 HWND g_hwnd{};
 HANDLE g_singleInstanceMutex{};
 HFONT g_font{}, g_metricsFont{}, g_smallFont{};
 HBITMAP g_nvidiaLogo{};
 HBRUSH g_backgroundBrush{};
+HDC g_logoDc{};
+HGDIOBJ g_logoOldBitmap{};
 std::array<std::wstring,8> g_compactParts{};
+static LoadDecision g_cachedLoadDecision;  // Cached from refreshDisplayCache
 struct ExpandedDisplay {
     std::wstring status;
     std::wstring gpu;
@@ -213,17 +233,6 @@ const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
 const wchar_t APP_VERSION[]=L"1.0.4";
-
-enum class LoadLevel { Green, Yellow, Red };
-enum class LoadSource { GPU, VRAM, Unavailable };
-
-struct LoadDecision {
-    unsigned gpu=0;
-    unsigned vram=0;
-    unsigned effective=0;
-    LoadLevel level=LoadLevel::Green;
-    LoadSource source=LoadSource::Unavailable;
-};
 
 struct HotkeyOption {
     UINT modifiers;
@@ -574,7 +583,8 @@ std::wstring compactMetrics() {
 void refreshDisplayCache() {
     g_compactParts=compactSegments();
     g_expandedDisplay={};
-    LoadDecision decision=assessLoad(g_stats);
+    g_cachedLoadDecision = assessLoad(g_stats);
+    const auto& decision = g_cachedLoadDecision;
 
     if(g_stats.ok) {
         g_expandedDisplay.gpu=g_stats.utilOk
@@ -640,11 +650,12 @@ void showFanModeMenu(HWND hwnd) {
 
 void drawNvidiaLogo(HDC dc,int x,int y) {
     if(!g_nvidiaLogo) return;
-    HDC logoDc=CreateCompatibleDC(dc);
-    HGDIOBJ old=SelectObject(logoDc,g_nvidiaLogo);
-    BitBlt(dc,x,y,32,22,logoDc,0,0,SRCCOPY);
-    SelectObject(logoDc,old);
-    DeleteDC(logoDc);
+    if(!g_logoDc) {
+        g_logoDc=CreateCompatibleDC(dc);
+        if(!g_logoDc) return;
+        g_logoOldBitmap=SelectObject(g_logoDc,g_nvidiaLogo);
+    }
+    BitBlt(dc,x,y,32,22,g_logoDc,0,0,SRCCOPY);
 }
 
 void paint(HWND hwnd) {
@@ -653,8 +664,9 @@ void paint(HWND hwnd) {
     RECT rc{}; GetClientRect(hwnd,&rc);
     FillRect(dc,&rc,g_backgroundBrush);
 
-    LoadDecision decision=assessLoad(g_stats);
+    const auto& decision = g_cachedLoadDecision;
     ULONGLONG now=GetTickCount64();
+
     HPEN border=CreatePen(PS_SOLID,1,animatedBorderColor(decision.level,now));
     HGDIOBJ oldPen=SelectObject(dc,border);
     HGDIOBJ oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));
@@ -802,7 +814,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
         return 0;
     case WM_LBUTTONDBLCLK:
-        g_expanded=!g_expanded; setWindowSize(); return 0;
+        g_expanded=!g_expanded; setWindowSize(); InvalidateRect(hwnd,nullptr,FALSE); return 0;
     case WM_LBUTTONDOWN:
         cancelHover(hwnd);
         g_dragging=true; SetCapture(hwnd);
@@ -908,9 +920,15 @@ void cleanupApp() {
     if(g_font) DeleteObject(g_font);
     if(g_metricsFont) DeleteObject(g_metricsFont);
     if(g_smallFont) DeleteObject(g_smallFont);
+    if(g_logoDc) {
+        if(g_logoOldBitmap) SelectObject(g_logoDc,g_logoOldBitmap);
+        DeleteDC(g_logoDc);
+    }
     if(g_nvidiaLogo) DeleteObject(g_nvidiaLogo);
     if(g_backgroundBrush) DeleteObject(g_backgroundBrush);
     if(g_singleInstanceMutex) CloseHandle(g_singleInstanceMutex);
+    g_logoDc=nullptr;
+    g_logoOldBitmap=nullptr;
     g_font=nullptr;
     g_metricsFont=nullptr;
     g_smallFont=nullptr;
