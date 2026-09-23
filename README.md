@@ -1,8 +1,8 @@
-# X1 AI Island v1.0.2
+# X1 AI Island v1.0.3
 
 A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RTX 3080 Laptop GPU use case.
 
-## What v1.0.2 shows
+## What v1.0.3 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -74,6 +74,8 @@ Recommended:
   keeping compact telemetry and the animated border easy to read.
 - Animation runs at a lightweight 10 FPS and pauses while the Island is hidden.
 - Telemetry text is cached and rebuilt only when the one-second readings update.
+- Only one Island instance can run in the current Windows session. Launching it
+  again restores the existing Island if hidden and brings it back to topmost.
 - Expanded view is intentionally concise: GPU status, VRAM use, fan mode, and
   both fan RPM values. Its aligned columns use explicit labels such as
   `GPU Load` and `Performance State`. It omits duplicate border and
@@ -87,6 +89,6 @@ Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperatur
 
 ## Version
 
-Version **1.0.2** arranges expanded telemetry as a balanced three-row,
+Version **1.0.3** adds single-instance behavior to the balanced three-row,
 three-column workstation dashboard. The centered, compact About dialog
 identifies the app as a `Local LLM AI Workstation Monitor`.

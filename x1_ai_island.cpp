@@ -157,6 +157,7 @@ struct FanTelemetryReader {
 } g_fanReader;
 
 HWND g_hwnd{};
+HANDLE g_singleInstanceMutex{};
 HFONT g_font{}, g_metricsFont{}, g_smallFont{};
 HBITMAP g_nvidiaLogo{};
 HBRUSH g_backgroundBrush{};
@@ -190,10 +191,12 @@ const UINT_PTR RESHOW_TIMER_ID=3;
 const UINT_PTR ANIMATION_TIMER_ID=4;
 const int HOTKEY_ID=1;
 const int FAN_HOTKEY_ID=2;
+const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
+const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
 const UINT ANIMATION_INTERVAL_MS=100;
-const wchar_t APP_VERSION[]=L"1.0.2";
+const wchar_t APP_VERSION[]=L"1.0.3";
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -687,6 +690,10 @@ void paint(HWND hwnd) {
 
 LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     switch(msg) {
+    case WM_SHOW_EXISTING_ISLAND:
+        showIsland(hwnd);
+        InvalidateRect(hwnd,nullptr,FALSE);
+        return 0;
     case WM_CREATE:
         SetTimer(hwnd,STATS_TIMER_ID,1000,nullptr);
         SetTimer(hwnd,ANIMATION_TIMER_ID,ANIMATION_INTERVAL_MS,nullptr);
@@ -827,6 +834,20 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
 
 int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    g_singleInstanceMutex=CreateMutexW(nullptr,FALSE,SINGLE_INSTANCE_MUTEX);
+    if(g_singleInstanceMutex && GetLastError()==ERROR_ALREADY_EXISTS) {
+        CloseHandle(g_singleInstanceMutex);
+        g_singleInstanceMutex=nullptr;
+        HWND existing{};
+        for(int attempt=0;attempt<40 && !existing;++attempt) {
+            existing=FindWindowW(L"X1AIIslandClass",L"X1 AI Island");
+            if(!existing) Sleep(50);
+        }
+        if(existing) PostMessageW(existing,WM_SHOW_EXISTING_ISLAND,0,0);
+        return 0;
+    }
+
     g_nvml.load();
     updateStats();
     refreshDisplayCache();
@@ -863,5 +884,6 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     DeleteObject(g_font); DeleteObject(g_metricsFont); DeleteObject(g_smallFont);
     if(g_nvidiaLogo) DeleteObject(g_nvidiaLogo);
     if(g_backgroundBrush) DeleteObject(g_backgroundBrush);
+    if(g_singleInstanceMutex) CloseHandle(g_singleInstanceMutex);
     return 0;
 }

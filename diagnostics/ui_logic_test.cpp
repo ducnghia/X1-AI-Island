@@ -59,5 +59,6 @@ int main() {
     assert(g_expandedDisplay.performanceState.find(L"Perf. State")!=std::wstring::npos);
     assert(g_expandedDisplay.cooling.find(L"Fan Mode")!=std::wstring::npos);
     assert(ANIMATION_INTERVAL_MS==100);
+    assert(WM_SHOW_EXISTING_ISLAND>WM_APP);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }
