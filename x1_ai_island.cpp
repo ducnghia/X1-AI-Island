@@ -193,7 +193,7 @@ const int FAN_HOTKEY_ID=2;
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
 const UINT ANIMATION_INTERVAL_MS=100;
-const wchar_t APP_VERSION[]=L"1.0.1";
+const wchar_t APP_VERSION[]=L"1.0.2";
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -530,8 +530,8 @@ void refreshDisplayCache() {
             ? formatText(L"Power  %.1fW",g_stats.watts)
             : L"Power  N/A";
         g_expandedDisplay.performanceState=g_stats.pstateOk
-            ? formatText(L"Performance State  P%u",g_stats.pstate)
-            : L"Performance State  P?";
+            ? formatText(L"Perf. State  P%u",g_stats.pstate)
+            : L"Perf. State  P?";
         if(g_stats.memoryOk) {
             g_expandedDisplay.vram=formatText(
                 L"VRAM  %.2f / %.2f GB",
@@ -548,8 +548,8 @@ void refreshDisplayCache() {
     }
 
     g_expandedDisplay.cooling=g_fans.ok
-        ? formatText(L"Cooling  %s",fanModeName(g_fans.mode))
-        : L"Cooling  Service unavailable";
+        ? formatText(L"Fan Mode  %s",fanModeName(g_fans.mode))
+        : L"Fan Mode  Service unavailable";
     if(g_fans.ok) {
         g_expandedDisplay.fan1=formatText(L"Fan 1  %lu RPM",g_fans.fan1);
         g_expandedDisplay.fan2=formatText(L"Fan 2  %lu RPM",g_fans.fan2);
@@ -657,30 +657,30 @@ void paint(HWND hwnd) {
         SetTextColor(dc,RGB(190,190,198));
         constexpr UINT LEFT_CELL=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
         constexpr UINT RIGHT_CELL=DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
-        RECT gpuCell={16,45,120,72};
-        RECT tempCell={120,45,274,72};
-        RECT powerCell={274,45,376,72};
-        RECT stateCell={376,45,rc.right-16,72};
-        RECT vramCell={16,72,392,99};
-        RECT fillCell={392,72,rc.right-16,99};
-        RECT coolingCell={16,99,220,124};
-        RECT fan1Cell={220,99,384,124};
-        RECT fan2Cell={384,99,rc.right-16,124};
+        RECT row1Column1={16,45,210,72};
+        RECT row1Column2={210,45,390,72};
+        RECT row1Column3={390,45,rc.right-16,72};
+        RECT row2Column1={16,72,210,99};
+        RECT row2Column2={210,72,390,99};
+        RECT row2Column3={390,72,rc.right-16,99};
+        RECT row3Column1={16,99,210,124};
+        RECT row3Column2={210,99,390,124};
+        RECT row3Column3={390,99,rc.right-16,124};
 
         if(!g_expandedDisplay.status.empty()) {
             RECT statusCell={16,45,rc.right-16,72};
             DrawTextW(dc,g_expandedDisplay.status.c_str(),-1,&statusCell,LEFT_CELL);
         } else {
-            DrawTextW(dc,g_expandedDisplay.gpu.c_str(),-1,&gpuCell,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.temperature.c_str(),-1,&tempCell,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.power.c_str(),-1,&powerCell,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.performanceState.c_str(),-1,&stateCell,RIGHT_CELL);
-            DrawTextW(dc,g_expandedDisplay.vram.c_str(),-1,&vramCell,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.fill.c_str(),-1,&fillCell,RIGHT_CELL);
+            DrawTextW(dc,g_expandedDisplay.gpu.c_str(),-1,&row1Column1,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.temperature.c_str(),-1,&row1Column2,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.power.c_str(),-1,&row1Column3,RIGHT_CELL);
+            DrawTextW(dc,g_expandedDisplay.vram.c_str(),-1,&row2Column1,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.fill.c_str(),-1,&row2Column2,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.performanceState.c_str(),-1,&row2Column3,RIGHT_CELL);
         }
-        DrawTextW(dc,g_expandedDisplay.cooling.c_str(),-1,&coolingCell,LEFT_CELL);
-        DrawTextW(dc,g_expandedDisplay.fan1.c_str(),-1,&fan1Cell,LEFT_CELL);
-        DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&fan2Cell,RIGHT_CELL);
+        DrawTextW(dc,g_expandedDisplay.cooling.c_str(),-1,&row3Column1,LEFT_CELL);
+        DrawTextW(dc,g_expandedDisplay.fan1.c_str(),-1,&row3Column2,LEFT_CELL);
+        DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&row3Column3,RIGHT_CELL);
     }
     EndPaint(hwnd,&ps);
 }

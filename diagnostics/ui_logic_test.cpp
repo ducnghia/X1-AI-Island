@@ -56,7 +56,8 @@ int main() {
     assert(g_compactParts[5]==L"AGGR");
     assert(g_expandedDisplay.gpu.find(L"GPU Load")!=std::wstring::npos);
     assert(g_expandedDisplay.temperature.find(L"Temperature")!=std::wstring::npos);
-    assert(g_expandedDisplay.performanceState.find(L"Performance State")!=std::wstring::npos);
+    assert(g_expandedDisplay.performanceState.find(L"Perf. State")!=std::wstring::npos);
+    assert(g_expandedDisplay.cooling.find(L"Fan Mode")!=std::wstring::npos);
     assert(ANIMATION_INTERVAL_MS==100);
     puts("PASS: max(GPU, VRAM) border, GPU-only name color, RGB pulse bias, compact telemetry.");
 }
