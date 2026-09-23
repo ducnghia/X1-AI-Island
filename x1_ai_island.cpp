@@ -48,6 +48,7 @@ struct NvmlApi {
     PFN_nvmlDeviceGetPowerUsage power{};
     PFN_nvmlDeviceGetPerformanceState performanceState{};
     nvmlDevice_t device{};
+    wchar_t deviceLabel[32]=L"NVIDIA GPU";
     bool initialized = false;
     bool ready = false;
 
@@ -63,6 +64,7 @@ struct NvmlApi {
         init=nullptr; shutdown=nullptr; count=nullptr; handle=nullptr;
         name=nullptr; util=nullptr; memory=nullptr; temp=nullptr;
         power=nullptr; performanceState=nullptr;
+        wcscpy_s(deviceLabel,L"NVIDIA GPU");
     }
 
     bool load() {
@@ -92,7 +94,8 @@ struct NvmlApi {
         unsigned int n = 0;
         if (count(&n) != 0 || n == 0) { unload(); return false; }
 
-        // Prefer an RTX 3080 if present; otherwise first NVIDIA device.
+        // NVML enumerates NVIDIA adapters only. Select the first available
+        // NVIDIA adapter without hard-coding a particular model.
         nvmlDevice_t first{};
         for (unsigned int i=0; i<n; ++i) {
             nvmlDevice_t d{};
@@ -100,11 +103,30 @@ struct NvmlApi {
             if (!first) first = d;
             char buf[128]{};
             if (name(d, buf, sizeof(buf)) == 0) {
-                if (strstr(buf,"RTX 3080")) { device=d; break; }
                 if (!device) device=d;
             }
         }
         if (!device) device = first;
+        if (device) {
+            char buf[128]{};
+            if (name(device, buf, sizeof(buf)) == 0) {
+                wchar_t fullName[128]{};
+                if(MultiByteToWideChar(CP_UTF8,0,buf,-1,
+                    fullName,ARRAYSIZE(fullName))>0) {
+                    const wchar_t* label=fullName;
+                    const wchar_t* markers[]={L"RTX ",L"GTX ",L"Quadro "};
+                    for(const wchar_t* marker:markers) {
+                        const wchar_t* found=wcsstr(fullName,marker);
+                        if(found) { label=found; break; }
+                    }
+                    if(wcsncmp(label,L"NVIDIA ",7)==0) label+=7;
+                    if(wcsncmp(label,L"GeForce ",8)==0) label+=8;
+                    wcsncpy_s(deviceLabel,label,_TRUNCATE);
+                    wchar_t* suffix=wcsstr(deviceLabel,L" Laptop");
+                    if(suffix) *suffix=L'\0';
+                }
+            }
+        }
         ready = device != nullptr;
         if(!ready) unload();
         return ready;
@@ -682,7 +704,8 @@ void paint(HWND hwnd) {
     // reflect the higher pressure of GPU utilization and VRAM fill.
     SetTextColor(dc,gpuTextColor(g_stats,now));
     RECT nameLine={47,4,121,42};
-    DrawTextW(dc,L"RTX 3080",-1,&nameLine,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+    DrawTextW(dc,g_nvml.deviceLabel,-1,&nameLine,
+        DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
 
     SetTextColor(dc,RGB(242,242,245));
     SelectObject(dc,g_metricsFont);
