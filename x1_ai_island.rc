@@ -4,25 +4,27 @@
 IDB_NVIDIA_LOGO BITMAP "nvidia_logo.bmp"
 IDB_3S_LOGO BITMAP "3s_logo_about.bmp"
 
-IDD_ABOUT_DIALOG DIALOGEX 0, 0, 250, 152
+IDD_ABOUT_DIALOG DIALOGEX 0, 0, 205, 128
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "About X1 AI Island"
 FONT 9, "Segoe UI"
 BEGIN
     CONTROL         "",IDC_ABOUT_LOGO,"Static",
-                    SS_BITMAP | SS_CENTERIMAGE,15,8,220,50
-    LTEXT           "X1 AI Island v1.0",IDC_ABOUT_VERSION,
-                    10,56,230,12,SS_CENTER
-    LTEXT           "Developed with Codex AI and Curiosity",IDC_ABOUT_TITLE,
-                    10,70,230,12,SS_CENTER
+                    SS_BITMAP | SS_CENTERIMAGE,10,5,185,43
+    LTEXT           "X1 AI Island v1.0.1",IDC_ABOUT_VERSION,
+                    8,48,189,11,SS_CENTER
+    LTEXT           "Local LLM AI Workstation Monitor",IDC_ABOUT_SUBTITLE,
+                    8,61,189,10,SS_CENTER
+    LTEXT           "Developed with Codex and Curiosity",IDC_ABOUT_TITLE,
+                    8,74,189,10,SS_CENTER
     LTEXT           "by nghia.td@3si.vn @2026-09",IDC_ABOUT_CREDIT,
-                    10,84,230,12,SS_CENTER
-    DEFPUSHBUTTON   "OK",IDOK,100,100,50,16
+                    8,87,189,10,SS_CENTER
+    DEFPUSHBUTTON   "OK",IDOK,78,104,49,16
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,0,1,0
+ PRODUCTVERSION 1,0,1,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -39,12 +41,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "3S Intersoft JSC"
             VALUE "FileDescription", "X1 AI Island"
-            VALUE "FileVersion", "1.0.0.0"
+            VALUE "FileVersion", "1.0.1.0"
             VALUE "InternalName", "X1-AI-Island"
-            VALUE "LegalCopyright", "Developed with Codex AI and Curiosity"
+            VALUE "LegalCopyright", "Developed with Codex and Curiosity"
             VALUE "OriginalFilename", "X1-AI-Island.exe"
             VALUE "ProductName", "X1 AI Island"
-            VALUE "ProductVersion", "1.0"
+            VALUE "ProductVersion", "1.0.1"
         END
     END
     BLOCK "VarFileInfo"

@@ -161,7 +161,18 @@ HFONT g_font{}, g_metricsFont{}, g_smallFont{};
 HBITMAP g_nvidiaLogo{};
 HBRUSH g_backgroundBrush{};
 std::array<std::wstring,8> g_compactParts{};
-std::array<std::wstring,3> g_expandedLines{};
+struct ExpandedDisplay {
+    std::wstring status;
+    std::wstring gpu;
+    std::wstring temperature;
+    std::wstring power;
+    std::wstring performanceState;
+    std::wstring vram;
+    std::wstring fill;
+    std::wstring cooling;
+    std::wstring fan1;
+    std::wstring fan2;
+} g_expandedDisplay;
 POINT g_dragStart{};
 bool g_dragging=false;
 bool g_expanded=false;
@@ -180,9 +191,9 @@ const UINT_PTR ANIMATION_TIMER_ID=4;
 const int HOTKEY_ID=1;
 const int FAN_HOTKEY_ID=2;
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
-const BYTE ISLAND_OPACITY=210; // 82% keeps the compact telemetry readable.
+const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
 const UINT ANIMATION_INTERVAL_MS=100;
-const wchar_t APP_VERSION[]=L"1.0";
+const wchar_t APP_VERSION[]=L"1.0.1";
 
 enum class LoadLevel { Green, Yellow, Red };
 enum class LoadSource { GPU, VRAM, Unavailable };
@@ -349,6 +360,18 @@ INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
         SetDlgItemTextW(dialog,IDC_ABOUT_VERSION,formatText(L"X1 AI Island v%s",APP_VERSION).c_str());
         SendDlgItemMessageW(dialog,IDC_ABOUT_VERSION,WM_SETFONT,
                             reinterpret_cast<WPARAM>(g_metricsFont),TRUE);
+
+        HWND owner=GetWindow(dialog,GW_OWNER);
+        HMONITOR monitor=MonitorFromWindow(owner ? owner : dialog,MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{sizeof(info)};
+        RECT window{};
+        if(GetMonitorInfoW(monitor,&info) && GetWindowRect(dialog,&window)) {
+            int width=window.right-window.left;
+            int height=window.bottom-window.top;
+            int x=info.rcWork.left+(info.rcWork.right-info.rcWork.left-width)/2;
+            int y=info.rcWork.top+(info.rcWork.bottom-info.rcWork.top-height)/2;
+            SetWindowPos(dialog,HWND_TOP,x,y,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
+        }
         return TRUE;
     }
     case WM_CTLCOLORDLG:
@@ -359,6 +382,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
         SetBkMode(dc,TRANSPARENT);
         int id=GetDlgCtrlID(control);
         if(id==IDC_ABOUT_VERSION || id==IDC_ABOUT_TITLE) SetTextColor(dc,RGB(52,148,245));
+        else if(id==IDC_ABOUT_SUBTITLE) SetTextColor(dc,RGB(86,104,120));
         else if(id==IDC_ABOUT_CREDIT) SetTextColor(dc,RGB(105,105,105));
         return reinterpret_cast<INT_PTR>(GetStockObject(WHITE_BRUSH));
     }
@@ -492,38 +516,43 @@ std::wstring compactMetrics() {
 
 void refreshDisplayCache() {
     g_compactParts=compactSegments();
-    g_expandedLines={L"",L"",L""};
+    g_expandedDisplay={};
     LoadDecision decision=assessLoad(g_stats);
 
     if(g_stats.ok) {
-        std::wstring gpu=g_stats.utilOk ? formatText(L"%u%%",decision.gpu) : L"N/A";
-        std::wstring temp=g_stats.tempOk ? formatText(L"%u\u00B0C",g_stats.temp) : L"N/A";
-        std::wstring power=g_stats.watts>=0 ? formatText(L"%.1fW",g_stats.watts) : L"N/A";
-        std::wstring pstate=g_stats.pstateOk ? formatText(L"P%u",g_stats.pstate) : L"P?";
-        g_expandedLines[0]=formatText(
-            L"GPU    %s        Temperature    %s        Power    %s        %s",
-            gpu.c_str(),temp.c_str(),power.c_str(),pstate.c_str());
-
+        g_expandedDisplay.gpu=g_stats.utilOk
+            ? formatText(L"GPU Load  %u%%",decision.gpu)
+            : L"GPU Load  N/A";
+        g_expandedDisplay.temperature=g_stats.tempOk
+            ? formatText(L"Temperature  %u\u00B0C",g_stats.temp)
+            : L"Temperature  N/A";
+        g_expandedDisplay.power=g_stats.watts>=0
+            ? formatText(L"Power  %.1fW",g_stats.watts)
+            : L"Power  N/A";
+        g_expandedDisplay.performanceState=g_stats.pstateOk
+            ? formatText(L"Performance State  P%u",g_stats.pstate)
+            : L"Performance State  P?";
         if(g_stats.memoryOk) {
-            g_expandedLines[1]=formatText(
-                L"VRAM    %.2f / %.2f GB        Fill    %u%%",
-                g_stats.used/1073741824.0,g_stats.total/1073741824.0,decision.vram);
+            g_expandedDisplay.vram=formatText(
+                L"VRAM  %.2f / %.2f GB",
+                g_stats.used/1073741824.0,g_stats.total/1073741824.0);
+            g_expandedDisplay.fill=formatText(L"Fill  %u%%",decision.vram);
         } else {
-            g_expandedLines[1]=L"VRAM    N/A        Fill    N/A";
+            g_expandedDisplay.vram=L"VRAM  N/A";
+            g_expandedDisplay.fill=L"Fill  N/A";
         }
     } else {
-        g_expandedLines[0]=g_nvml.ready
+        g_expandedDisplay.status=g_nvml.ready
             ? L"GPU readings temporarily unavailable; retrying every second."
             : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.";
     }
 
-    std::wstring cooling=g_fans.ok ? fanModeName(g_fans.mode) : L"Service unavailable";
+    g_expandedDisplay.cooling=g_fans.ok
+        ? formatText(L"Cooling  %s",fanModeName(g_fans.mode))
+        : L"Cooling  Service unavailable";
     if(g_fans.ok) {
-        g_expandedLines[2]=formatText(
-            L"Cooling    %s        Fan 1    %lu RPM        Fan 2    %lu RPM",
-            cooling.c_str(),g_fans.fan1,g_fans.fan2);
-    } else {
-        g_expandedLines[2]=formatText(L"Cooling    %s",cooling.c_str());
+        g_expandedDisplay.fan1=formatText(L"Fan 1  %lu RPM",g_fans.fan1);
+        g_expandedDisplay.fan2=formatText(L"Fan 2  %lu RPM",g_fans.fan2);
     }
 }
 
@@ -626,11 +655,32 @@ void paint(HWND hwnd) {
     if(g_expanded) {
         SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
-        RECT r1={16,45,rc.right-16,72}, r2={16,72,rc.right-16,99};
-        RECT r3={16,99,rc.right-16,124};
-        DrawTextW(dc,g_expandedLines[0].c_str(),-1,&r1,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        DrawTextW(dc,g_expandedLines[1].c_str(),-1,&r2,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        DrawTextW(dc,g_expandedLines[2].c_str(),-1,&r3,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        constexpr UINT LEFT_CELL=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
+        constexpr UINT RIGHT_CELL=DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
+        RECT gpuCell={16,45,120,72};
+        RECT tempCell={120,45,274,72};
+        RECT powerCell={274,45,376,72};
+        RECT stateCell={376,45,rc.right-16,72};
+        RECT vramCell={16,72,392,99};
+        RECT fillCell={392,72,rc.right-16,99};
+        RECT coolingCell={16,99,220,124};
+        RECT fan1Cell={220,99,384,124};
+        RECT fan2Cell={384,99,rc.right-16,124};
+
+        if(!g_expandedDisplay.status.empty()) {
+            RECT statusCell={16,45,rc.right-16,72};
+            DrawTextW(dc,g_expandedDisplay.status.c_str(),-1,&statusCell,LEFT_CELL);
+        } else {
+            DrawTextW(dc,g_expandedDisplay.gpu.c_str(),-1,&gpuCell,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.temperature.c_str(),-1,&tempCell,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.power.c_str(),-1,&powerCell,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.performanceState.c_str(),-1,&stateCell,RIGHT_CELL);
+            DrawTextW(dc,g_expandedDisplay.vram.c_str(),-1,&vramCell,LEFT_CELL);
+            DrawTextW(dc,g_expandedDisplay.fill.c_str(),-1,&fillCell,RIGHT_CELL);
+        }
+        DrawTextW(dc,g_expandedDisplay.cooling.c_str(),-1,&coolingCell,LEFT_CELL);
+        DrawTextW(dc,g_expandedDisplay.fan1.c_str(),-1,&fan1Cell,LEFT_CELL);
+        DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&fan2Cell,RIGHT_CELL);
     }
     EndPaint(hwnd,&ps);
 }
@@ -785,7 +835,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
     g_metricsFont=CreateFontW(-14,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-    g_smallFont=CreateFontW(-13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
+    g_smallFont=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
     g_nvidiaLogo=LoadBitmapW(h,MAKEINTRESOURCEW(IDB_NVIDIA_LOGO));
     g_backgroundBrush=CreateSolidBrush(RGB(18,18,20));
