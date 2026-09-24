@@ -1,6 +1,32 @@
 # X1 AI Island v1.0.4
 
-A tiny native Windows overlay made for the ThinkPad X1 Extreme Gen 4 + NVIDIA RTX 3080 Laptop GPU use case.
+A tiny native Windows overlay for Lenovo ThinkPad AI workstations with an
+NVIDIA dGPU. The Island detects and displays the NVIDIA model reported by NVML
+instead of hard-coding a specific GeForce or RTX model.
+
+![X1 AI Island collapsed](docs/screenshots/x1-ai-island-collapsed.png)
+
+## Screenshots
+
+### Expanded telemetry
+
+Double-click the Island to open the balanced three-row, three-column dashboard.
+
+![Expanded Island](docs/screenshots/x1-ai-island-expanded.png)
+
+### Context menu
+
+Right-click the Island to access display controls, the global hide/show
+shortcut, Fan Control, About information and Exit.
+
+![Context menu](docs/screenshots/x1-ai-island-context-menu.png)
+
+### Fan Control
+
+Press `Ctrl+Shift+F`, or open the Fan Control submenu, to select BIOS Auto,
+Cool or Aggressive with the keyboard.
+
+![Fan Control menu](docs/screenshots/x1-ai-island-fan-control.png)
 
 ## What v1.0.4 shows
 
@@ -54,6 +80,23 @@ Press **Ctrl+Shift+F** to open the Fan Control submenu directly, then use the
 arrow keys and Enter. Compact mode stays unchanged in BIOS Auto, shows a fixed
 NVIDIA-green `COOL` badge in Cool mode, and shows an animated yellow/red
 `AGGR` badge in Aggressive mode.
+
+## Fan Control safety
+
+GPU monitoring uses NVIDIA NVML and can work with other NVIDIA dGPU models.
+The low-level fan service is intentionally more restricted:
+
+- `X1FanService` currently enables EC access only for the tested Lenovo
+  ThinkPad machine type `20Y6`.
+- Do not remove or broaden the model guard unless the EC registers and fan
+  behavior have been verified on that exact laptop model.
+- **BIOS Auto** is the default and safest mode.
+- Cool and Aggressive are optional custom curves. At high temperature, service
+  shutdown, or normal Island exit, control is returned to the BIOS.
+- PawnIO is a third-party kernel driver. Review
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) before installing it.
+- GPU monitoring remains usable when the fan service or PawnIO is not
+  installed; fan values will simply appear as unavailable.
 
 ## Build
 
