@@ -13,7 +13,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.0.4
+// X1 AI Island v1.0.5
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -254,7 +254,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.0.4";
+const wchar_t APP_VERSION[]=L"1.0.5";
 
 struct HotkeyOption {
     UINT modifiers;
@@ -558,6 +558,17 @@ void updateStats() {
     g_fanReader.update();
 }
 
+void resetToTopCenter(HWND hwnd) {
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
+    RECT window{};
+    GetWindowRect(hwnd, &window);
+    const int width = window.right - window.left;
+    const int x = monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2;
+    const int y = monitor.rcWork.top + 18;
+    SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void setWindowSize() {
     int w = 560;
     int h = g_expanded ? 128 : 46;
@@ -622,13 +633,15 @@ void refreshDisplayCache() {
             ? formatText(L"Perf. State  P%u",g_stats.pstate)
             : L"Perf. State  P?";
         if(g_stats.memoryOk) {
+            double usedGB=g_stats.used/1073741824.0;
+            double totalGB=g_stats.total/1073741824.0;
             g_expandedDisplay.vram=formatText(
-                L"VRAM  %.2f / %.2f GB",
-                g_stats.used/1073741824.0,g_stats.total/1073741824.0);
-            g_expandedDisplay.fill=formatText(L"Fill  %u%%",decision.vram);
+                L"VRAM  %.1f/%.1f GB",
+                usedGB,totalGB);
+            g_expandedDisplay.fill=formatText(L"VRAM Usage  %u%%",decision.vram);
         } else {
             g_expandedDisplay.vram=L"VRAM  N/A";
-            g_expandedDisplay.fill=L"Fill  N/A";
+            g_expandedDisplay.fill=L"VRAM Usage  N/A";
         }
     } else {
         g_expandedDisplay.status=g_nvml.ready
@@ -868,6 +881,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         HMENU fanModes=CreatePopupMenu();
         HMENU shortcuts=CreatePopupMenu();
         AppendMenuW(m,MF_STRING,1,L"Expand / Collapse");
+        AppendMenuW(m,MF_STRING,4,L"Reset to top center");
         AppendMenuW(fanModes,MF_STRING,200,L"BIOS Auto (default)");
         AppendMenuW(fanModes,MF_STRING,201,L"Cool");
         AppendMenuW(fanModes,MF_STRING,202,L"Aggressive");
@@ -899,6 +913,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         g_contextOpen=false;
         DestroyMenu(m);
         if(cmd==1){g_expanded=!g_expanded;setWindowSize();}
+        if(cmd==4) resetToTopCenter(hwnd);
         if(cmd>=200 && cmd<=202) {
             requestFanMode(hwnd,static_cast<DWORD>(cmd-200));
         }
@@ -998,12 +1013,14 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
         return 1;
     }
 
-    int sw=GetSystemMetrics(SM_CXSCREEN);
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
     const int initialWidth=560;
-    const int initialX=(std::max)(0,(sw-initialWidth)/2);
+    const int initialX=monitor.rcWork.left+(monitor.rcWork.right-monitor.rcWork.left-initialWidth)/2;
+    const int initialY=monitor.rcWork.top+18;
     g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,
         wc.lpszClassName,L"X1 AI Island",WS_POPUP,
-        initialX,18,initialWidth,46,nullptr,nullptr,h,nullptr);
+        initialX,initialY,initialWidth,46,nullptr,nullptr,h,nullptr);
     if(!g_hwnd) {
         cleanupApp();
         return 1;
