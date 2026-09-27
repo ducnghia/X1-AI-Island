@@ -244,6 +244,7 @@ bool g_hoverHidden=false;
 bool g_autoHideOnHover=true;
 bool g_hotkeyRegistered=false;
 bool g_fanHotkeyRegistered=false;
+bool g_contextHotkeyRegistered=false;
 int g_hotkeyChoice=0;
 const UINT_PTR STATS_TIMER_ID=1;
 const UINT_PTR HOVER_TIMER_ID=2;
@@ -251,6 +252,7 @@ const UINT_PTR RESHOW_TIMER_ID=3;
 const UINT_PTR ANIMATION_TIMER_ID=4;
 const int HOTKEY_ID=1;
 const int FAN_HOTKEY_ID=2;
+const int CONTEXT_HOTKEY_ID=3;
 const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
@@ -835,6 +837,12 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         registerToggleHotkey(hwnd,g_hotkeyChoice);
         g_fanHotkeyRegistered=RegisterHotKey(
             hwnd,FAN_HOTKEY_ID,MOD_CONTROL|MOD_SHIFT|MOD_NOREPEAT,'F')!=FALSE;
+        g_contextHotkeyRegistered=RegisterHotKey(
+            hwnd,CONTEXT_HOTKEY_ID,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'I')!=FALSE;
+        if(!g_contextHotkeyRegistered) {
+            MessageBoxW(hwnd,L"Ctrl+Alt+I is already in use by another application.",
+                        L"X1 AI Island",MB_OK|MB_ICONWARNING);
+        }
         return 0;
     case WM_TIMER:
         if(wp==STATS_TIMER_ID) {
@@ -880,6 +888,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     case WM_HOTKEY:
         if(wp==HOTKEY_ID) toggleIsland(hwnd);
         if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
+        if(wp==CONTEXT_HOTKEY_ID) PostMessageW(hwnd,WM_RBUTTONUP,0,0);
         return 0;
     case WM_LBUTTONDBLCLK:
         g_expanded=!g_expanded; setWindowSize(); ensureTopmostVisible(hwnd); InvalidateRect(hwnd,nullptr,FALSE); return 0;
@@ -978,6 +987,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         KillTimer(hwnd,RESHOW_TIMER_ID);
         if(g_hotkeyRegistered) UnregisterHotKey(hwnd,HOTKEY_ID);
         if(g_fanHotkeyRegistered) UnregisterHotKey(hwnd,FAN_HOTKEY_ID);
+        if(g_contextHotkeyRegistered) UnregisterHotKey(hwnd,CONTEXT_HOTKEY_ID);
         g_hotkeyRegistered=false;
         g_fanHotkeyRegistered=false;
         g_fanReader.requestMode(X1_FAN_MODE_BIOS_AUTO);
