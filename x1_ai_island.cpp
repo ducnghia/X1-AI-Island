@@ -13,7 +13,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.0.5
+// X1 AI Island v1.1.0
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -241,6 +241,7 @@ bool g_hoverConsumed=false;
 bool g_contextOpen=false;
 bool g_userHidden=false;
 bool g_hoverHidden=false;
+bool g_autoHideOnHover=true;
 bool g_hotkeyRegistered=false;
 bool g_fanHotkeyRegistered=false;
 int g_hotkeyChoice=0;
@@ -254,7 +255,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.0.5";
+const wchar_t APP_VERSION[]=L"1.1.0";
 
 struct HotkeyOption {
     UINT modifiers;
@@ -283,6 +284,20 @@ void saveHotkeyChoice(int choice) {
     if(RegCreateKeyExW(HKEY_CURRENT_USER,SETTINGS_KEY,0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS) {
         DWORD value=static_cast<DWORD>(choice);
         RegSetValueExW(key,L"HotkeyChoice",0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
+        RegCloseKey(key);
+    }
+}
+
+bool loadAutoHideOnHover() {
+    DWORD value=1, size=sizeof(value);
+    return RegGetValueW(HKEY_CURRENT_USER,SETTINGS_KEY,L"AutoHideOnHover",RRF_RT_REG_DWORD,nullptr,&value,&size)!=ERROR_SUCCESS || value != 0;
+}
+
+void saveAutoHideOnHover(bool enabled) {
+    HKEY key{};
+    if(RegCreateKeyExW(HKEY_CURRENT_USER,SETTINGS_KEY,0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS) {
+        DWORD value=enabled ? 1 : 0;
+        RegSetValueExW(key,L"AutoHideOnHover",0,REG_DWORD,reinterpret_cast<const BYTE*>(&value),sizeof(value));
         RegCloseKey(key);
     }
 }
@@ -356,12 +371,17 @@ void rescheduleMonitoring(HWND hwnd) {
     startAnimation(hwnd);
 }
 
+void ensureTopmostVisible(HWND hwnd) {
+    if(IsWindowVisible(hwnd) && !g_userHidden && !g_hoverHidden)
+        SetWindowPos(hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+}
+
 void showIsland(HWND hwnd) {
     g_userHidden=false;
     g_hoverHidden=false;
     KillTimer(hwnd,RESHOW_TIMER_ID);
     ShowWindow(hwnd,SW_SHOWNOACTIVATE);
-    SetWindowPos(hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    ensureTopmostVisible(hwnd);
     refreshNow(hwnd);
     rescheduleMonitoring(hwnd);
 }
@@ -383,6 +403,17 @@ void cancelHover(HWND hwnd) {
     KillTimer(hwnd,HOVER_TIMER_ID);
     g_trackingMouse=false;
     g_hoverConsumed=false;
+}
+
+void setAutoHideOnHover(HWND hwnd,bool enabled) {
+    if(g_autoHideOnHover==enabled) return;
+    g_autoHideOnHover=enabled;
+    saveAutoHideOnHover(enabled);
+    cancelHover(hwnd);
+    if(!enabled) {
+        KillTimer(hwnd,RESHOW_TIMER_ID);
+        if(g_hoverHidden && !g_userHidden) showIsland(hwnd);
+    }
 }
 
 bool cursorInside(HWND hwnd) {
@@ -800,6 +831,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         startStats(hwnd);
         startAnimation(hwnd);
         g_hotkeyChoice=loadHotkeyChoice();
+        g_autoHideOnHover=loadAutoHideOnHover();
         registerToggleHotkey(hwnd,g_hotkeyChoice);
         g_fanHotkeyRegistered=RegisterHotKey(
             hwnd,FAN_HOTKEY_ID,MOD_CONTROL|MOD_SHIFT|MOD_NOREPEAT,'F')!=FALSE;
@@ -815,7 +847,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             InvalidateRect(hwnd,nullptr,FALSE);
         } else if(wp==HOVER_TIMER_ID) {
             KillTimer(hwnd,HOVER_TIMER_ID);
-            if(!g_contextOpen && !g_dragging && !g_userHidden && cursorInside(hwnd)) {
+            if(g_autoHideOnHover && !g_contextOpen && !g_dragging && !g_userHidden && cursorInside(hwnd)) {
                 g_hoverConsumed=true;
                 g_hoverHidden=true;
                 g_trackingMouse=false;
@@ -825,7 +857,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
             }
         } else if(wp==RESHOW_TIMER_ID) {
             KillTimer(hwnd,RESHOW_TIMER_ID);
-            if(g_hoverHidden && !g_userHidden) {
+            if(g_autoHideOnHover && g_hoverHidden && !g_userHidden) {
                 showIsland(hwnd);
                 if(cursorInside(hwnd)) {
                     TRACKMOUSEEVENT tme{sizeof(tme),TME_LEAVE,hwnd,0};
@@ -850,7 +882,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
         return 0;
     case WM_LBUTTONDBLCLK:
-        g_expanded=!g_expanded; setWindowSize(); InvalidateRect(hwnd,nullptr,FALSE); return 0;
+        g_expanded=!g_expanded; setWindowSize(); ensureTopmostVisible(hwnd); InvalidateRect(hwnd,nullptr,FALSE); return 0;
     case WM_LBUTTONDOWN:
         cancelHover(hwnd);
         g_dragging=true; SetCapture(hwnd);
@@ -860,7 +892,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         if(g_dragging && (wp & MK_LBUTTON)) {
             POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)}; ClientToScreen(hwnd,&p);
             SetWindowPos(hwnd,HWND_TOPMOST,p.x-g_dragStart.x,p.y-g_dragStart.y,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
-        } else if(!g_trackingMouse && !g_contextOpen) {
+        } else if(g_autoHideOnHover && !g_trackingMouse && !g_contextOpen) {
             TRACKMOUSEEVENT tme{sizeof(tme),TME_LEAVE,hwnd,0};
             TrackMouseEvent(&tme);
             g_trackingMouse=true;
@@ -871,7 +903,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         cancelHover(hwnd);
         return 0;
     case WM_LBUTTONUP:
-        g_dragging=false; ReleaseCapture(); return 0;
+        g_dragging=false; ReleaseCapture(); ensureTopmostVisible(hwnd); return 0;
     case WM_RBUTTONDOWN:
         cancelHover(hwnd);
         return 0;
@@ -882,6 +914,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         HMENU shortcuts=CreatePopupMenu();
         AppendMenuW(m,MF_STRING,1,L"Expand / Collapse");
         AppendMenuW(m,MF_STRING,4,L"Reset to top center");
+        AppendMenuW(m,MF_STRING|(g_autoHideOnHover?MF_CHECKED:0),6,L"Auto-hide on hover");
         AppendMenuW(fanModes,MF_STRING,200,L"BIOS Auto (default)");
         AppendMenuW(fanModes,MF_STRING,201,L"Cool");
         AppendMenuW(fanModes,MF_STRING,202,L"Aggressive");
@@ -912,8 +945,9 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         int cmd=TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,hwnd,nullptr);
         g_contextOpen=false;
         DestroyMenu(m);
-        if(cmd==1){g_expanded=!g_expanded;setWindowSize();}
-        if(cmd==4) resetToTopCenter(hwnd);
+        if(cmd==1){g_expanded=!g_expanded;setWindowSize();ensureTopmostVisible(hwnd);}
+        if(cmd==4) { resetToTopCenter(hwnd); ensureTopmostVisible(hwnd); }
+        if(cmd==6) setAutoHideOnHover(hwnd,!g_autoHideOnHover);
         if(cmd>=200 && cmd<=202) {
             requestFanMode(hwnd,static_cast<DWORD>(cmd-200));
         }

@@ -1,4 +1,4 @@
-# X1 AI Island v1.0.5
+# X1 AI Island v1.1.0
 
 A tiny native Windows overlay for Lenovo ThinkPad AI workstations with an
 NVIDIA dGPU. The Island detects and displays the NVIDIA model reported by NVML
@@ -16,8 +16,9 @@ Double-click the Island to open the balanced three-row, three-column dashboard.
 
 ### Context menu
 
-Right-click the Island to access display controls, Reset to top center, the
-global hide/show shortcut, Fan Control, About information and Exit.
+Right-click the Island to access display controls, Reset to top center,
+Auto-hide on hover, the global hide/show shortcut, Fan Control, About
+information and Exit.
 
 ![Context menu](docs/screenshots/x1-ai-island-context-menu.png)
 
@@ -28,7 +29,7 @@ Cool or Aggressive with the keyboard.
 
 ![Fan Control menu](docs/screenshots/x1-ai-island-fan-control.png)
 
-## What v1.0.5 shows
+## What v1.1.0 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -129,7 +130,11 @@ Recommended:
   both fan RPM values. Its aligned columns use explicit labels such as
   `GPU Load` and `Performance State`. It omits duplicate border and
   memory-engine details.
-- Hover for one second: hide the Island for five seconds so content beneath it can be seen, then return automatically.
+- The Island restores its topmost z-order whenever it is shown, moved, resized,
+  or reset, without a continuous z-order polling timer.
+- `Auto-hide on hover` is enabled by default: hover for one second to hide the
+  Island for five seconds so content beneath it can be seen, then return
+  automatically. Toggle it from the context menu; the setting persists.
 - All NVML, shared-memory, event, GDI, hotkey and mutex resources owned by the
   Island are explicitly released on exit.
 
@@ -138,6 +143,10 @@ Recommended:
 Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperature, and power.
 
 ## Version
+
+Version **1.1.0** restores the topmost z-order whenever the Island becomes
+visible or changes state. It also adds a persisted, default-enabled
+**Auto-hide on hover** context-menu toggle.
 
 Version **1.0.5** adds **Reset to top center** to the context menu, restoring
 the Island to its default position at the top center of the primary display.
