@@ -888,7 +888,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     case WM_HOTKEY:
         if(wp==HOTKEY_ID) toggleIsland(hwnd);
         if(wp==FAN_HOTKEY_ID) showFanModeMenu(hwnd);
-        if(wp==CONTEXT_HOTKEY_ID) PostMessageW(hwnd,WM_RBUTTONUP,0,0);
+        if(wp==CONTEXT_HOTKEY_ID) PostMessageW(hwnd,WM_RBUTTONUP,0,1);
         return 0;
     case WM_LBUTTONDBLCLK:
         g_expanded=!g_expanded; setWindowSize(); ensureTopmostVisible(hwnd); InvalidateRect(hwnd,nullptr,FALSE); return 0;
@@ -948,7 +948,13 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         AppendMenuW(m,MF_SEPARATOR,0,nullptr);
         AppendMenuW(m,MF_STRING,5,L"About X1 AI Island");
         AppendMenuW(m,MF_STRING,2,L"Exit");
-        POINT p{}; GetCursorPos(&p);
+        POINT p{};
+        if(lp==1) {
+            RECT r{}; GetWindowRect(hwnd,&r);
+            p={r.left+(r.right-r.left)/2,r.top+(r.bottom-r.top)/2};
+        } else {
+            GetCursorPos(&p);
+        }
         SetForegroundWindow(hwnd);
         g_contextOpen=true;
         int cmd=TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,hwnd,nullptr);
