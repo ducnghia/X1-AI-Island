@@ -18,3 +18,6 @@ diagnostics/*.log
 # Windows metadata
 Thumbs.db
 Desktop.ini
+
+# Installer backups
+*.exe.bak.*
