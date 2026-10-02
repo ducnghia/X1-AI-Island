@@ -59,6 +59,20 @@ class PawnEc {
     HANDLE device_=INVALID_HANDLE_VALUE;
     HANDLE mutex_{};
 
+    class EcLock {
+        HANDLE mutex_;
+        bool locked_;
+    public:
+        explicit EcLock(HANDLE mutex) : mutex_(mutex) {
+            DWORD result=WaitForSingleObject(mutex_,1000);
+            locked_=result==WAIT_OBJECT_0 || result==WAIT_ABANDONED;
+        }
+        ~EcLock() { if(locked_) ReleaseMutex(mutex_); }
+        EcLock(const EcLock&)=delete;
+        EcLock& operator=(const EcLock&)=delete;
+        explicit operator bool() const { return locked_; }
+    };
+
     bool execute(const char* name,const ULONGLONG* input,DWORD inputCount,
                  ULONGLONG* output,DWORD outputCount) {
         if(inputCount>2) return false;
@@ -148,8 +162,8 @@ public:
         return mutex_ ? X1_FAN_OK : X1_FAN_EC_UNAVAILABLE;
     }
     bool sample(DWORD& fan1,DWORD& fan2) {
-        DWORD wait=WaitForSingleObject(mutex_,1000);
-        if(wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return false;
+        EcLock lock(mutex_);
+        if(!lock) return false;
         bool ok=true;
         DWORD rpm[2]{};
         for(BYTE fan=0;fan<2 && ok;fan++) {
@@ -160,13 +174,12 @@ public:
             rpm[fan]=value<=0x1fff ? value : 0;
         }
         writeRegister(REG_FAN_SELECT,0);
-        ReleaseMutex(mutex_);
         if(ok) { fan1=rpm[0]; fan2=rpm[1]; }
         return ok;
     }
     bool readHottestTemp(LONG& hottest) {
-        DWORD wait=WaitForSingleObject(mutex_,1000);
-        if(wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return false;
+        EcLock lock(mutex_);
+        if(!lock) return false;
         bool ok=true;
         hottest=-127;
         for(int i=0;i<12 && ok;i++) {
@@ -176,12 +189,11 @@ public:
             signed char temp=static_cast<signed char>(raw);
             if(ok && temp>0 && temp<120 && temp>hottest) hottest=temp;
         }
-        ReleaseMutex(mutex_);
         return ok && hottest>-127;
     }
     bool setFanLevel(BYTE level) {
-        DWORD wait=WaitForSingleObject(mutex_,1000);
-        if(wait!=WAIT_OBJECT_0 && wait!=WAIT_ABANDONED) return false;
+        EcLock lock(mutex_);
+        if(!lock) return false;
         bool ok=true;
         for(BYTE fan=0;fan<2 && ok;fan++) {
             BYTE verify=0;
@@ -189,7 +201,6 @@ public:
                readRegister(REG_FAN_CTRL,verify) && (verify&0xc7)==(level&0xc7);
         }
         writeRegister(REG_FAN_SELECT,0);
-        ReleaseMutex(mutex_);
         return ok;
     }
 };

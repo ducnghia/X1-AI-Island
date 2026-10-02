@@ -1,4 +1,4 @@
-# X1 AI Island v1.1.0
+# X1 AI Island v1.1.1
 
 A tiny native Windows overlay for Lenovo ThinkPad AI workstations with an
 NVIDIA dGPU. The Island detects and displays the NVIDIA model reported by NVML
@@ -29,7 +29,7 @@ Cool or Aggressive with the keyboard.
 
 ![Fan Control menu](docs/screenshots/x1-ai-island-fan-control.png)
 
-## What v1.1.0 shows
+## What v1.1.1 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -115,8 +115,8 @@ Recommended:
 - Drag: move Island.
 - Double-click: expand/collapse.
 - **Ctrl+D**: hide/show globally (default).
-- Right-click: open Fan Control, expand/collapse, hide, change the global
-  shortcut, view About information, or exit.
+- Right-click or press **Ctrl+Alt+I**: open the Island context menu to access
+  Fan Control, expand/collapse, hide, change the global shortcut, About, or Exit.
 - The Island uses 85% window opacity to soften the dark background while
   keeping compact telemetry and the animated border easy to read.
 - Animation refresh is adaptive: warnings stay responsive while the normal
@@ -143,6 +143,10 @@ Recommended:
 Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperature, and power.
 
 ## Version
+
+Version **1.1.1** caches compact text measurements between animation frames,
+restores the original GDI font even when the primary font is unavailable,
+and rejects fan telemetry snapshots when sequence validation fails.
 
 Version **1.1.0** restores the topmost z-order whenever the Island becomes
 visible or changes state. It also adds a persisted, default-enabled

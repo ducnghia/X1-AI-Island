@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <array>
+#include <utility>
 #include <cstdarg>
 #include <cstring>
 #include <cmath>
@@ -13,7 +14,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.1.0
+// X1 AI Island v1.1.1
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -168,14 +169,19 @@ struct FanTelemetryReader {
         g_fans={};
         if(!view || view->magic!=X1_FAN_MAGIC || view->version!=X1_FAN_VERSION) return;
         X1FanTelemetry copy{};
+        bool snapshotValid=false;
         for(int tries=0;tries<3;tries++) {
             LONG before=view->sequence;
             if(before&1) continue;
             MemoryBarrier();
             copy=*view;
             MemoryBarrier();
-            if(before==view->sequence) break;
+            if(before==view->sequence) {
+                snapshotValid=true;
+                break;
+            }
         }
+        if(!snapshotValid) return;
         g_fans.status=copy.status;
         g_fans.fan1=copy.fan1Rpm;
         g_fans.fan2=copy.fan2Rpm;
@@ -220,6 +226,33 @@ HBRUSH g_backgroundBrush{};
 HDC g_logoDc{};
 HGDIOBJ g_logoOldBitmap{};
 std::array<std::wstring,8> g_compactParts{};
+struct CompactMeasurements {
+    std::array<SIZE,8> sizes{};
+    int totalWidth=0;
+    int activeSegments=0;
+    HGDIOBJ font{};
+    UINT dpi=0;
+    bool valid=false;
+
+    void update(HDC dc,UINT currentDpi) {
+        HGDIOBJ currentFont=GetCurrentObject(dc,OBJ_FONT);
+        if(valid && font==currentFont && dpi==currentDpi) return;
+        sizes={};
+        totalWidth=0;
+        activeSegments=0;
+        valid=true;
+        for(size_t i=0;i<g_compactParts.size();++i) {
+            const auto& part=g_compactParts[i];
+            if(part.empty()) continue;
+            if(!GetTextExtentPoint32W(dc,part.c_str(),static_cast<int>(part.size()),&sizes[i]))
+                valid=false; // Retry failed measurements on the next paint.
+            totalWidth+=sizes[i].cx;
+            activeSegments++;
+        }
+        font=currentFont;
+        dpi=currentDpi;
+    }
+} g_compactMeasurements;
 static LoadDecision g_cachedLoadDecision;  // Cached from refreshDisplayCache
 struct ExpandedDisplay {
     std::wstring status;
@@ -257,7 +290,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.1.0";
+const wchar_t APP_VERSION[]=L"1.1.1";
 
 struct HotkeyOption {
     UINT modifiers;
@@ -608,7 +641,7 @@ void setWindowSize() {
     RECT r{}; GetWindowRect(g_hwnd,&r);
     SetWindowPos(g_hwnd,HWND_TOPMOST,r.left,r.top,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
     HRGN region=CreateRoundRectRgn(0,0,w+1,h+1,24,24);
-    SetWindowRgn(g_hwnd,region,TRUE);
+    if(region && !SetWindowRgn(g_hwnd,region,TRUE)) DeleteObject(region);
 }
 
 std::array<std::wstring,8> compactSegments() {
@@ -647,7 +680,11 @@ std::wstring compactMetrics() {
 }
 
 void refreshDisplayCache() {
-    g_compactParts=compactSegments();
+    auto parts=compactSegments();
+    if(parts!=g_compactParts) {
+        g_compactParts=std::move(parts);
+        g_compactMeasurements.valid=false;
+    }
     g_expandedDisplay={};
     g_cachedLoadDecision = assessLoad(g_stats);
     const auto& decision = g_cachedLoadDecision;
@@ -743,7 +780,8 @@ void paint(HWND hwnd) {
     DeleteObject(border);
 
     SetBkMode(dc,TRANSPARENT);
-    SelectObject(dc,g_font);
+    HGDIOBJ oldFont=GetCurrentObject(dc,OBJ_FONT);
+    if(g_font) SelectObject(dc,g_font);
 
     drawNvidiaLogo(dc,10,12);
     // The GPU name reflects GPU utilization only. The border continues to
@@ -754,17 +792,13 @@ void paint(HWND hwnd) {
         DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
 
     SetTextColor(dc,RGB(242,242,245));
-    SelectObject(dc,g_metricsFont);
+
+    if(g_metricsFont) SelectObject(dc,g_metricsFont);
     const auto& parts=g_compactParts;
-    std::array<SIZE,8> sizes{};
-    int totalWidth=0;
-    int activeSegments=0;
-    for(size_t i=0;i<parts.size();++i) {
-        if(parts[i].empty()) continue;
-        GetTextExtentPoint32W(dc,parts[i].c_str(),static_cast<int>(parts[i].size()),&sizes[i]);
-        totalWidth+=sizes[i].cx;
-        activeSegments++;
-    }
+    g_compactMeasurements.update(dc,GetDpiForWindow(hwnd));
+    const auto& sizes=g_compactMeasurements.sizes;
+    const int totalWidth=g_compactMeasurements.totalWidth;
+    const int activeSegments=g_compactMeasurements.activeSegments;
     const int left=126;
     const int right=rc.right-4;
     int extra=(std::max)(0,right-left-totalWidth);
@@ -791,7 +825,7 @@ void paint(HWND hwnd) {
     }
 
     if(g_expanded) {
-        SelectObject(dc,g_smallFont);
+        if(g_smallFont) SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
         constexpr UINT LEFT_CELL=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
         constexpr UINT RIGHT_CELL=DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
@@ -820,6 +854,7 @@ void paint(HWND hwnd) {
         DrawTextW(dc,g_expandedDisplay.fan1.c_str(),-1,&row3Column2,LEFT_CELL);
         DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&row3Column3,RIGHT_CELL);
     }
+    if(oldFont) SelectObject(dc,oldFont);
     EndPaint(hwnd,&ps);
 }
 
