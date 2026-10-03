@@ -1,4 +1,4 @@
-# X1 AI Island v1.1.1
+# X1 AI Island v1.1.2
 
 A tiny native Windows overlay for Lenovo ThinkPad AI workstations with an
 NVIDIA dGPU. The Island detects and displays the NVIDIA model reported by NVML
@@ -10,7 +10,17 @@ instead of hard-coding a specific GeForce or RTX model.
 
 ### Expanded telemetry
 
-Double-click the Island to open the balanced three-row, three-column dashboard.
+Double-click the Island to open a fixed six-column, three-row dashboard.
+Each row contains three label/value pairs; labels are left-aligned and stay in place
+when values change. Both expanded and compact views are 520 pixels wide.
+Expanded VRAM shows only used memory (for example `9.3GB`); `VRAM-Use` shows
+its percentage. `Temp` and `VRAM-Use` keep labels readable at this width.
+Unavailable readings keep their cells and show `N/A` (or `Unavailable` for fan mode).
+The screenshot below shows the previous layout.
+
+Rendering uses a reusable double buffer with direct-paint fallback if GDI allocation
+fails. Telemetry refreshes only request repaint when visible text or the load color
+changes; animation ticks retain their existing behavior.
 
 ![Expanded Island](docs/screenshots/x1-ai-island-expanded.png)
 
@@ -29,14 +39,16 @@ Cool or Aggressive with the keyboard.
 
 ![Fan Control menu](docs/screenshots/x1-ai-island-fan-control.png)
 
-## What v1.1.1 shows
+## What v1.1.2 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
 - GPU temperature
 - GPU power draw when the driver exposes it
 - NVIDIA performance state (`P0` through `P8` when exposed by the driver)
-- Fan 1 and Fan 2 RPM in both compact and expanded views through `X1FanService`
+- Compact fan reading `F`: the maximum of Fan 1 and Fan 2 RPM, or `F --` when unavailable
+- Expanded view retains separate Fan 1 and Fan 2 RPM through `X1FanService`
+- `F` is not a GPU-fan identification; the EC channels have no verified CPU/GPU mapping
 - A thin rounded status border driven by the higher of VRAM usage or dGPU load:
   - NVIDIA-green breathing pulse below 50%
   - yellow-dominant RGB pulse from 50% through 79%
@@ -143,6 +155,13 @@ Recommended:
 Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperature, and power.
 
 ## Version
+
+Version **1.1.2** narrows both views to 520 pixels and introduces a fixed
+six-column, three-row expanded layout with separate labels and values.
+Compact mode shows `F` as the maximum of both fan RPM readings; expanded mode
+retains both fans and shows used VRAM without the total. It also skips redundant
+telemetry repaints, safely falls back when backbuffer creation fails, and adds
+color-output, resize, allocation-failure, label-fit and GDI resource tests.
 
 Version **1.1.1** caches compact text measurements between animation frames,
 restores the original GDI font even when the primary font is unavailable,

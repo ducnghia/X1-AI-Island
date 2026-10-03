@@ -14,7 +14,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.1.1
+// X1 AI Island v1.1.2
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -232,11 +232,12 @@ int g_backbufferWidth=0, g_backbufferHeight=0;
 
 void cleanupBackbuffer() {
     if(g_backbufferDc) {
-        if(g_backbufferOldBitmap) SelectObject(g_backbufferDc,g_backbufferOldBitmap);
+        if(g_backbufferOldBitmap && g_backbufferOldBitmap!=HGDI_ERROR)
+            SelectObject(g_backbufferDc,g_backbufferOldBitmap);
         DeleteDC(g_backbufferDc);
         g_backbufferDc=nullptr;
-        g_backbufferOldBitmap=nullptr;
     }
+    g_backbufferOldBitmap=nullptr;
     if(g_backbufferBitmap) {
         DeleteObject(g_backbufferBitmap);
         g_backbufferBitmap=nullptr;
@@ -244,9 +245,37 @@ void cleanupBackbuffer() {
     g_backbufferWidth=0;
     g_backbufferHeight=0;
 }
-std::array<std::wstring,8> g_compactParts{};
+
+bool ensureBackbuffer(HDC screenDc,int width,int height) {
+    if(!screenDc || width<=0 || height<=0) {
+        cleanupBackbuffer();
+        return false;
+    }
+    if(g_backbufferDc && g_backbufferBitmap && g_backbufferOldBitmap &&
+       g_backbufferOldBitmap!=HGDI_ERROR &&
+       g_backbufferWidth==width && g_backbufferHeight==height) return true;
+
+    cleanupBackbuffer();
+    g_backbufferDc=CreateCompatibleDC(screenDc);
+    if(g_backbufferDc) {
+        g_backbufferBitmap=CreateCompatibleBitmap(screenDc,width,height);
+        if(g_backbufferBitmap) {
+            HGDIOBJ oldBitmap=SelectObject(g_backbufferDc,g_backbufferBitmap);
+            if(oldBitmap && oldBitmap!=HGDI_ERROR) {
+                g_backbufferOldBitmap=oldBitmap;
+                g_backbufferWidth=width;
+                g_backbufferHeight=height;
+                return true;
+            }
+        }
+    }
+    cleanupBackbuffer();
+    return false;
+}
+constexpr int ISLAND_WIDTH=520;
+std::array<std::wstring,7> g_compactParts{};
 struct CompactMeasurements {
-    std::array<SIZE,8> sizes{};
+    std::array<SIZE,7> sizes{};
     int totalWidth=0;
     int activeSegments=0;
     HGDIOBJ font{};
@@ -274,17 +303,23 @@ struct CompactMeasurements {
 } g_compactMeasurements;
 static LoadDecision g_cachedLoadDecision;  // Cached from refreshDisplayCache
 struct ExpandedDisplay {
-    std::wstring status;
-    std::wstring gpu;
-    std::wstring temperature;
-    std::wstring power;
-    std::wstring performanceState;
-    std::wstring vram;
-    std::wstring fill;
-    std::wstring cooling;
-    std::wstring fan1;
-    std::wstring fan2;
+    std::array<std::wstring,9> values{};
 } g_expandedDisplay;
+constexpr const wchar_t* EXPANDED_LABELS[]={
+    L"GPU Load",L"Temp",L"Power",
+    L"VRAM",L"VRAM-Use",L"Perf. State",
+    L"Fan Mode",L"Fan 1",L"Fan 2"
+};
+
+RECT expandedCell(int width,int row,int column) {
+    // Three fixed label/value pairs keep text positions stable as readings change.
+    constexpr int padding=16, gap=12;
+    int pairWidth=(width-2*padding-2*gap)/3;
+    int left=padding+(column/2)*(pairWidth+gap);
+    int split=left+pairWidth/2;
+    return {column%2 ? split : left,45+row*27,
+            column%2 ? left+pairWidth : split-4,72+row*27};
+}
 POINT g_dragStart{};
 bool g_dragging=false;
 bool g_expanded=false;
@@ -309,7 +344,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.1.1";
+const wchar_t APP_VERSION[]=L"1.1.2";
 
 struct HotkeyOption {
     UINT modifiers;
@@ -380,7 +415,7 @@ void selectHotkey(HWND hwnd,int choice) {
 }
 
 void updateStats();
-void refreshDisplayCache();
+bool refreshDisplayCache();
 LoadLevel loadLevel(const Stats& s);
 
 bool runningOnBattery() {
@@ -415,8 +450,7 @@ void stopMonitoring(HWND hwnd) {
 
 void refreshNow(HWND hwnd) {
     updateStats();
-    refreshDisplayCache();
-    InvalidateRect(hwnd,nullptr,FALSE);
+    if(refreshDisplayCache()) InvalidateRect(hwnd,nullptr,FALSE);
 }
 
 void rescheduleMonitoring(HWND hwnd) {
@@ -655,7 +689,7 @@ void resetToTopCenter(HWND hwnd) {
 }
 
 void setWindowSize() {
-    int w = 560;
+    int w = ISLAND_WIDTH;
     int h = g_expanded ? 128 : 46;
     RECT r{}; GetWindowRect(g_hwnd,&r);
     SetWindowPos(g_hwnd,HWND_TOPMOST,r.left,r.top,w,h,SWP_NOACTIVATE|SWP_SHOWWINDOW);
@@ -663,8 +697,8 @@ void setWindowSize() {
     if(region && !SetWindowRgn(g_hwnd,region,TRUE)) DeleteObject(region);
 }
 
-std::array<std::wstring,8> compactSegments() {
-    std::array<std::wstring,8> parts{};
+std::array<std::wstring,7> compactSegments() {
+    std::array<std::wstring,7> parts{};
     parts[0]=g_stats.utilOk ? formatText(L"%u%%",g_stats.gpu) : L"N/A";
     if(g_stats.memoryOk) {
         constexpr double GIB=1073741824.0;
@@ -682,8 +716,7 @@ std::array<std::wstring,8> compactSegments() {
     parts[4]=g_stats.watts>=0 ? formatText(L"%.0fW",g_stats.watts) : L"--W";
     if(g_fans.ok && g_fans.mode==X1_FAN_MODE_COOL) parts[5]=L"COOL";
     if(g_fans.ok && g_fans.mode==X1_FAN_MODE_AGGRESSIVE) parts[5]=L"AGGR";
-    parts[6]=g_fans.ok ? formatText(L"F1 %lu",g_fans.fan1) : L"F1 --";
-    parts[7]=g_fans.ok ? formatText(L"F2 %lu",g_fans.fan2) : L"F2 --";
+    parts[6]=g_fans.ok ? formatText(L"F %lu",(std::max)(g_fans.fan1,g_fans.fan2)) : L"F --";
     return parts;
 }
 
@@ -698,53 +731,32 @@ std::wstring compactMetrics() {
     return result;
 }
 
-void refreshDisplayCache() {
+bool refreshDisplayCache() {
     auto parts=compactSegments();
-    if(parts!=g_compactParts) {
+    bool compactChanged=parts!=g_compactParts;
+    if(compactChanged) {
         g_compactParts=std::move(parts);
         g_compactMeasurements.valid=false;
     }
-    g_expandedDisplay={};
-    g_cachedLoadDecision = assessLoad(g_stats);
-    const auto& decision = g_cachedLoadDecision;
-
-    if(g_stats.ok) {
-        g_expandedDisplay.gpu=g_stats.utilOk
-            ? formatText(L"GPU Load  %u%%",decision.gpu)
-            : L"GPU Load  N/A";
-        g_expandedDisplay.temperature=g_stats.tempOk
-            ? formatText(L"Temperature  %u\u00B0C",g_stats.temp)
-            : L"Temperature  N/A";
-        g_expandedDisplay.power=g_stats.watts>=0
-            ? formatText(L"Power  %.1fW",g_stats.watts)
-            : L"Power  N/A";
-        g_expandedDisplay.performanceState=g_stats.pstateOk
-            ? formatText(L"Perf. State  P%u",g_stats.pstate)
-            : L"Perf. State  P?";
-        if(g_stats.memoryOk) {
-            double usedGB=g_stats.used/1073741824.0;
-            double totalGB=g_stats.total/1073741824.0;
-            g_expandedDisplay.vram=formatText(
-                L"VRAM  %.1f/%.1f GB",
-                usedGB,totalGB);
-            g_expandedDisplay.fill=formatText(L"VRAM Usage  %u%%",decision.vram);
-        } else {
-            g_expandedDisplay.vram=L"VRAM  N/A";
-            g_expandedDisplay.fill=L"VRAM Usage  N/A";
-        }
-    } else {
-        g_expandedDisplay.status=g_nvml.ready
-            ? L"GPU readings temporarily unavailable; retrying every second."
-            : L"NVIDIA NVML could not be initialized. Check NVIDIA driver.";
-    }
-
-    g_expandedDisplay.cooling=g_fans.ok
-        ? formatText(L"Fan Mode  %s",fanModeName(g_fans.mode))
-        : L"Fan Mode  Service unavailable";
-    if(g_fans.ok) {
-        g_expandedDisplay.fan1=formatText(L"Fan 1  %lu RPM",g_fans.fan1);
-        g_expandedDisplay.fan2=formatText(L"Fan 2  %lu RPM",g_fans.fan2);
-    }
+    LoadDecision decision=assessLoad(g_stats);
+    bool colorChanged=decision.level!=g_cachedLoadDecision.level;
+    g_cachedLoadDecision=decision;
+    ExpandedDisplay next;
+    auto& values=next.values;
+    values[0]=g_stats.utilOk ? formatText(L"%u%%",decision.gpu) : L"N/A";
+    values[1]=g_stats.tempOk ? formatText(L"%u\u00B0C",g_stats.temp) : L"N/A";
+    values[2]=g_stats.watts>=0 ? formatText(L"%.1fW",g_stats.watts) : L"N/A";
+    values[3]=g_stats.memoryOk
+        ? formatText(L"%.1fGB",g_stats.used/1073741824.0)
+        : L"N/A";
+    values[4]=g_stats.memoryOk ? formatText(L"%u%%",decision.vram) : L"N/A";
+    values[5]=g_stats.pstateOk ? formatText(L"P%u",g_stats.pstate) : L"N/A";
+    values[6]=g_fans.ok ? fanModeName(g_fans.mode) : L"Unavailable";
+    values[7]=g_fans.ok ? formatText(L"%lu RPM",g_fans.fan1) : L"N/A";
+    values[8]=g_fans.ok ? formatText(L"%lu RPM",g_fans.fan2) : L"N/A";
+    bool expandedChanged=next.values!=g_expandedDisplay.values;
+    g_expandedDisplay=std::move(next);
+    return compactChanged || colorChanged || (g_expanded && expandedChanged);
 }
 
 void requestFanMode(HWND hwnd,DWORD mode) {
@@ -788,23 +800,12 @@ void paint(HWND hwnd) {
     RECT rc{}; GetClientRect(hwnd,&rc);
     int width=rc.right-rc.left;
     int height=rc.bottom-rc.top;
-    if(width<=0 || height<=0) {
+    if(!screenDc || width<=0 || height<=0) {
         EndPaint(hwnd,&ps);
         return;
     }
 
-    if(!g_backbufferDc || g_backbufferWidth!=width || g_backbufferHeight!=height) {
-        cleanupBackbuffer();
-        g_backbufferDc=CreateCompatibleDC(screenDc);
-        if(g_backbufferDc) {
-            g_backbufferBitmap=CreateCompatibleBitmap(screenDc,width,height);
-            if(g_backbufferBitmap) {
-                g_backbufferOldBitmap=SelectObject(g_backbufferDc,g_backbufferBitmap);
-                g_backbufferWidth=width;
-                g_backbufferHeight=height;
-            }
-        }
-    }
+    ensureBackbuffer(screenDc,width,height);
 
     HDC dc=g_backbufferDc ? g_backbufferDc : screenDc;
     FillRect(dc,&rc,g_backgroundBrush);
@@ -867,32 +868,19 @@ void paint(HWND hwnd) {
     if(g_expanded) {
         if(g_smallFont) SelectObject(dc,g_smallFont);
         SetTextColor(dc,RGB(190,190,198));
-        constexpr UINT LEFT_CELL=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
-        constexpr UINT RIGHT_CELL=DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS;
-        RECT row1Column1={16,45,210,72};
-        RECT row1Column2={210,45,390,72};
-        RECT row1Column3={390,45,rc.right-16,72};
-        RECT row2Column1={16,72,210,99};
-        RECT row2Column2={210,72,390,99};
-        RECT row2Column3={390,72,rc.right-16,99};
-        RECT row3Column1={16,99,210,124};
-        RECT row3Column2={210,99,390,124};
-        RECT row3Column3={390,99,rc.right-16,124};
-
-        if(!g_expandedDisplay.status.empty()) {
-            RECT statusCell={16,45,rc.right-16,72};
-            DrawTextW(dc,g_expandedDisplay.status.c_str(),-1,&statusCell,LEFT_CELL);
-        } else {
-            DrawTextW(dc,g_expandedDisplay.gpu.c_str(),-1,&row1Column1,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.temperature.c_str(),-1,&row1Column2,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.power.c_str(),-1,&row1Column3,RIGHT_CELL);
-            DrawTextW(dc,g_expandedDisplay.vram.c_str(),-1,&row2Column1,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.fill.c_str(),-1,&row2Column2,LEFT_CELL);
-            DrawTextW(dc,g_expandedDisplay.performanceState.c_str(),-1,&row2Column3,RIGHT_CELL);
+        for(int row=0;row<3;++row) {
+            for(int pair=0;pair<3;++pair) {
+                int index=row*3+pair;
+                RECT label=expandedCell(width,row,pair*2);
+                RECT value=expandedCell(width,row,pair*2+1);
+                SetTextColor(dc,RGB(190,190,198));
+                DrawTextW(dc,EXPANDED_LABELS[index],-1,&label,
+                    DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+                SetTextColor(dc,RGB(242,242,245));
+                DrawTextW(dc,g_expandedDisplay.values[index].c_str(),-1,&value,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+            }
         }
-        DrawTextW(dc,g_expandedDisplay.cooling.c_str(),-1,&row3Column1,LEFT_CELL);
-        DrawTextW(dc,g_expandedDisplay.fan1.c_str(),-1,&row3Column2,LEFT_CELL);
-        DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&row3Column3,RIGHT_CELL);
     }
     if(oldFont) SelectObject(dc,oldFont);
     if(g_backbufferDc) {
@@ -927,8 +915,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     case WM_TIMER:
         if(wp==STATS_TIMER_ID) {
             updateStats();
-            refreshDisplayCache();
-            InvalidateRect(hwnd,nullptr,FALSE);
+            if(refreshDisplayCache()) InvalidateRect(hwnd,nullptr,FALSE);
             SetTimer(hwnd,STATS_TIMER_ID,statsIntervalMs(),nullptr);
             SetTimer(hwnd,ANIMATION_TIMER_ID,animationIntervalMs(),nullptr);
         } else if(wp==ANIMATION_TIMER_ID) {
@@ -1146,7 +1133,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
 
     MONITORINFO monitor{sizeof(monitor)};
     GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
-    const int initialWidth=560;
+    const int initialWidth=ISLAND_WIDTH;
     const int initialX=monitor.rcWork.left+(monitor.rcWork.right-monitor.rcWork.left-initialWidth)/2;
     const int initialY=monitor.rcWork.top+18;
     g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,
