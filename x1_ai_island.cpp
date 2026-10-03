@@ -225,6 +225,25 @@ HBITMAP g_nvidiaLogo{};
 HBRUSH g_backgroundBrush{};
 HDC g_logoDc{};
 HGDIOBJ g_logoOldBitmap{};
+HDC g_backbufferDc{};
+HBITMAP g_backbufferBitmap{};
+HGDIOBJ g_backbufferOldBitmap{};
+int g_backbufferWidth=0, g_backbufferHeight=0;
+
+void cleanupBackbuffer() {
+    if(g_backbufferDc) {
+        if(g_backbufferOldBitmap) SelectObject(g_backbufferDc,g_backbufferOldBitmap);
+        DeleteDC(g_backbufferDc);
+        g_backbufferDc=nullptr;
+        g_backbufferOldBitmap=nullptr;
+    }
+    if(g_backbufferBitmap) {
+        DeleteObject(g_backbufferBitmap);
+        g_backbufferBitmap=nullptr;
+    }
+    g_backbufferWidth=0;
+    g_backbufferHeight=0;
+}
 std::array<std::wstring,8> g_compactParts{};
 struct CompactMeasurements {
     std::array<SIZE,8> sizes{};
@@ -765,19 +784,40 @@ void drawNvidiaLogo(HDC dc,int x,int y) {
 
 void paint(HWND hwnd) {
     PAINTSTRUCT ps{};
-    HDC dc=BeginPaint(hwnd,&ps);
+    HDC screenDc=BeginPaint(hwnd,&ps);
     RECT rc{}; GetClientRect(hwnd,&rc);
+    int width=rc.right-rc.left;
+    int height=rc.bottom-rc.top;
+    if(width<=0 || height<=0) {
+        EndPaint(hwnd,&ps);
+        return;
+    }
+
+    if(!g_backbufferDc || g_backbufferWidth!=width || g_backbufferHeight!=height) {
+        cleanupBackbuffer();
+        g_backbufferDc=CreateCompatibleDC(screenDc);
+        if(g_backbufferDc) {
+            g_backbufferBitmap=CreateCompatibleBitmap(screenDc,width,height);
+            if(g_backbufferBitmap) {
+                g_backbufferOldBitmap=SelectObject(g_backbufferDc,g_backbufferBitmap);
+                g_backbufferWidth=width;
+                g_backbufferHeight=height;
+            }
+        }
+    }
+
+    HDC dc=g_backbufferDc ? g_backbufferDc : screenDc;
     FillRect(dc,&rc,g_backgroundBrush);
 
     const auto& decision = g_cachedLoadDecision;
     ULONGLONG now=GetTickCount64();
 
-    HPEN border=CreatePen(PS_SOLID,1,animatedBorderColor(decision.level,now));
-    HGDIOBJ oldPen=SelectObject(dc,border);
+    HGDIOBJ oldPen=SelectObject(dc,GetStockObject(DC_PEN));
+    COLORREF oldPenColor=SetDCPenColor(dc,animatedBorderColor(decision.level,now));
     HGDIOBJ oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));
     RoundRect(dc,1,1,rc.right-1,rc.bottom-1,24,24);
     SelectObject(dc,oldBrush); SelectObject(dc,oldPen);
-    DeleteObject(border);
+    SetDCPenColor(dc,oldPenColor);
 
     SetBkMode(dc,TRANSPARENT);
     HGDIOBJ oldFont=GetCurrentObject(dc,OBJ_FONT);
@@ -855,11 +895,16 @@ void paint(HWND hwnd) {
         DrawTextW(dc,g_expandedDisplay.fan2.c_str(),-1,&row3Column3,RIGHT_CELL);
     }
     if(oldFont) SelectObject(dc,oldFont);
+    if(g_backbufferDc) {
+        BitBlt(screenDc,0,0,width,height,g_backbufferDc,0,0,SRCCOPY);
+    }
     EndPaint(hwnd,&ps);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     switch(msg) {
+    case WM_ERASEBKGND:
+        return 1;
     case WM_SHOW_EXISTING_ISLAND:
         showIsland(hwnd);
         InvalidateRect(hwnd,nullptr,FALSE);
@@ -1038,6 +1083,7 @@ LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
 }
 
 void cleanupApp() {
+    cleanupBackbuffer();
     g_fanReader.close();
     g_nvml.unload();
     if(g_font) DeleteObject(g_font);

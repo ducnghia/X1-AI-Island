@@ -62,12 +62,22 @@ int main() {
     g_font=nullptr; g_metricsFont=font; g_smallFont=font;
     g_backgroundBrush=CreateSolidBrush(RGB(18,18,20));
     assert(g_backgroundBrush);
+    HGDIOBJ originalPen=GetCurrentObject(dc,OBJ_PEN);
+    HGDIOBJ originalBrush=GetCurrentObject(dc,OBJ_BRUSH);
+    SetDCPenColor(dc,RGB(12,34,56));
     for(bool expanded : {false,true}) {
         g_expanded=expanded;
         paint(window);
         assert(GetCurrentObject(dc,OBJ_FONT)==original);
+        assert(GetCurrentObject(dc,OBJ_PEN)==originalPen);
+        assert(GetCurrentObject(dc,OBJ_BRUSH)==originalBrush);
+        assert(GetDCPenColor(dc)==RGB(12,34,56));
     }
+    DWORD handlesBefore=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
+    for(int frame=0;frame<1000;++frame) paint(window);
+    assert(GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)==handlesBefore);
     DestroyWindow(window);
+    cleanupBackbuffer();
     DeleteObject(g_backgroundBrush); g_backgroundBrush=nullptr;
     g_metricsFont=nullptr; g_smallFont=nullptr;
     DeleteObject(font); DeleteDC(dc);
