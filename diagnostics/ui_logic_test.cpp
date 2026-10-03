@@ -63,8 +63,10 @@ int main() {
     assert(compactMetrics().find(L"AGGR")!=std::wstring::npos);
     refreshDisplayCache();
     assert(g_compactParts[5]==L"AGGR");
-    assert(g_expandedDisplay.values[7]==L"3816 RPM");
-    assert(g_expandedDisplay.values[8]==L"3540 RPM");
+    assert(wcscmp(EXPANDED_LABELS[7],L"Fan 1 (RPM)")==0);
+    assert(wcscmp(EXPANDED_LABELS[8],L"Fan 2 (RPM)")==0);
+    assert(g_expandedDisplay.values[7]==L"3816");
+    assert(g_expandedDisplay.values[8]==L"3540");
     assert(g_expandedDisplay.values[0]==L"70%");
     assert(!g_expandedDisplay.values[1].empty());
     assert(g_expandedDisplay.values[5]==L"P8");

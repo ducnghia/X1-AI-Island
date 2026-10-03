@@ -308,7 +308,7 @@ struct ExpandedDisplay {
 constexpr const wchar_t* EXPANDED_LABELS[]={
     L"GPU Load",L"Temp",L"Power",
     L"VRAM",L"VRAM-Use",L"Perf. State",
-    L"Fan Mode",L"Fan 1",L"Fan 2"
+    L"Fan Mode",L"Fan 1 (RPM)",L"Fan 2 (RPM)"
 };
 
 RECT expandedCell(int width,int row,int column) {
@@ -316,7 +316,8 @@ RECT expandedCell(int width,int row,int column) {
     constexpr int padding=16, gap=12;
     int pairWidth=(width-2*padding-2*gap)/3;
     int left=padding+(column/2)*(pairWidth+gap);
-    int split=left+pairWidth/2;
+    // Fan units live in the label; numeric-only values need less room.
+    int split=left+((row==2 && column>=2) ? pairWidth*65/100 : pairWidth/2);
     return {column%2 ? split : left,45+row*27,
             column%2 ? left+pairWidth : split-4,72+row*27};
 }
@@ -752,8 +753,8 @@ bool refreshDisplayCache() {
     values[4]=g_stats.memoryOk ? formatText(L"%u%%",decision.vram) : L"N/A";
     values[5]=g_stats.pstateOk ? formatText(L"P%u",g_stats.pstate) : L"N/A";
     values[6]=g_fans.ok ? fanModeName(g_fans.mode) : L"Unavailable";
-    values[7]=g_fans.ok ? formatText(L"%lu RPM",g_fans.fan1) : L"N/A";
-    values[8]=g_fans.ok ? formatText(L"%lu RPM",g_fans.fan2) : L"N/A";
+    values[7]=g_fans.ok ? formatText(L"%lu",g_fans.fan1) : L"N/A";
+    values[8]=g_fans.ok ? formatText(L"%lu",g_fans.fan2) : L"N/A";
     bool expandedChanged=next.values!=g_expandedDisplay.values;
     g_expandedDisplay=std::move(next);
     return compactChanged || colorChanged || (g_expanded && expandedChanged);
