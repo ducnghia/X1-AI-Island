@@ -53,6 +53,9 @@ struct NvmlApi {
     bool initialized = false;
     bool ready = false;
 
+    ULONGLONG lastAttempt = 0;
+    static constexpr ULONGLONG RETRY_INTERVAL_MS = 5000;
+
     template<class T> T sym(const char* n) { return reinterpret_cast<T>(GetProcAddress(dll, n)); }
 
     void unload() {
@@ -70,6 +73,9 @@ struct NvmlApi {
 
     bool load() {
         if(dll) return ready;
+        ULONGLONG now = GetTickCount64();
+        if(lastAttempt && (now - lastAttempt < RETRY_INTERVAL_MS)) return false;
+        lastAttempt = now;
         const wchar_t* candidates[] = {
             L"nvml.dll",
             L"C:\\Windows\\System32\\nvml.dll",
@@ -656,6 +662,9 @@ COLORREF gpuTextColor(const Stats& s,ULONGLONG now) {
 }
 
 void updateStats() {
+    if (!g_nvml.ready) {
+        g_nvml.load();
+    }
     Stats s{};
     if (g_nvml.ready) {
         nvmlUtilization_t u{};
@@ -673,6 +682,11 @@ void updateStats() {
         s.pstateOk = g_nvml.performanceState && g_nvml.performanceState(g_nvml.device,&ps)==0;
         if(s.pstateOk) s.pstate=ps;
         s.ok = s.utilOk || s.memoryOk || s.tempOk || s.watts>=0 || s.pstateOk;
+        if (!s.ok) {
+            // Driver may have been updated, restarted, or disconnected.
+            // Safely unload so next interval can cleanly re-initialize NVML.
+            g_nvml.unload();
+        }
     }
     g_stats=s;
     g_fanReader.update();

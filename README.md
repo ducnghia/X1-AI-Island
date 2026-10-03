@@ -1,4 +1,4 @@
-# X1 AI Island v1.1.2
+# X1 AI Island v1.1.3
 
 A tiny native Windows overlay for Lenovo ThinkPad AI workstations with an
 NVIDIA dGPU. The Island detects and displays the NVIDIA model reported by NVML
@@ -39,7 +39,7 @@ Cool or Aggressive with the keyboard.
 
 ![Fan Control menu](docs/screenshots/x1-ai-island-fan-control.png)
 
-## What v1.1.2 shows
+## What v1.1.3 shows
 
 - NVIDIA GPU utilization
 - Dedicated VRAM used / total
@@ -155,6 +155,11 @@ Recommended:
 Run `nvidia-smi` beside the Island and compare GPU utilization, VRAM, temperature, and power.
 
 ## Version
+
+Version **1.1.3** adds safe NVML self-healing recovery after driver crashes,
+restarts, or GPU power-state disconnects without requiring an application restart.
+Internal bitmap assets are compressed with RLE8 encoding to reduce application size
+and initial loading time.
 
 Version **1.1.2** narrows both views to 520 pixels and introduces a fixed
 six-column, three-row expanded layout with separate labels and values.
