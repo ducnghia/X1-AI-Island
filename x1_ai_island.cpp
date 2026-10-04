@@ -351,7 +351,6 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.1.3";
 
 struct HotkeyOption {
     UINT modifiers;
@@ -571,7 +570,6 @@ INT_PTR CALLBACK AboutDialogProc(HWND dialog,UINT msg,WPARAM wp,LPARAM lp) {
         SetWindowLongPtrW(dialog,DWLP_USER,reinterpret_cast<LONG_PTR>(logo));
         SendDlgItemMessageW(dialog,IDC_ABOUT_LOGO,STM_SETIMAGE,IMAGE_BITMAP,
                             reinterpret_cast<LPARAM>(logo));
-        SetDlgItemTextW(dialog,IDC_ABOUT_VERSION,formatText(L"X1 AI Island v%s",APP_VERSION).c_str());
         SendDlgItemMessageW(dialog,IDC_ABOUT_VERSION,WM_SETFONT,
                             reinterpret_cast<WPARAM>(g_metricsFont),TRUE);
 
