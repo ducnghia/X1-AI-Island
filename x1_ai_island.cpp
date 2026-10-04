@@ -14,7 +14,7 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// X1 AI Island v1.1.2
+// X1 AI Island v1.1.3
 // Native Win32 overlay. NVIDIA telemetry is queried by dynamically loading
 // nvml.dll from the installed NVIDIA driver: no CUDA SDK/NVML headers needed.
 // UI rendering remains ordinary Win32/GDI and does not intentionally create
@@ -351,7 +351,7 @@ const UINT WM_SHOW_EXISTING_ISLAND=WM_APP+1;
 const wchar_t SINGLE_INSTANCE_MUTEX[]=L"Local\\X1AIIsland.SingleInstance";
 const COLORREF NVIDIA_GREEN=RGB(119,185,1);
 const BYTE ISLAND_OPACITY=217; // 85% keeps expanded telemetry clear while retaining translucency.
-const wchar_t APP_VERSION[]=L"1.1.2";
+const wchar_t APP_VERSION[]=L"1.1.3";
 
 struct HotkeyOption {
     UINT modifiers;
