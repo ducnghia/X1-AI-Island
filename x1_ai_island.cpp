@@ -314,7 +314,7 @@ struct ExpandedDisplay {
 constexpr const wchar_t* EXPANDED_LABELS[]={
     L"GPU Load",L"Temp",L"Power",
     L"VRAM",L"VRAM-Use",L"Perf. State",
-    L"Fan Mode",L"Fan 1 (RPM)",L"Fan 2 (RPM)"
+    L"Fan Mode",L"Fan 1 (rpm)",L"Fan 2"
 };
 
 RECT expandedCell(int width,int row,int column) {
@@ -879,16 +879,16 @@ void paint(HWND hwnd) {
     }
 
     if(g_expanded) {
-        if(g_smallFont) SelectObject(dc,g_smallFont);
-        SetTextColor(dc,RGB(190,190,198));
         for(int row=0;row<3;++row) {
             for(int pair=0;pair<3;++pair) {
                 int index=row*3+pair;
                 RECT label=expandedCell(width,row,pair*2);
                 RECT value=expandedCell(width,row,pair*2+1);
-                SetTextColor(dc,RGB(190,190,198));
+                if(g_smallFont) SelectObject(dc,g_smallFont);
+                SetTextColor(dc,RGB(155,160,168));
                 DrawTextW(dc,EXPANDED_LABELS[index],-1,&label,
                     DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+                if(g_metricsFont) SelectObject(dc,g_metricsFont);
                 SetTextColor(dc,RGB(242,242,245));
                 DrawTextW(dc,g_expandedDisplay.values[index].c_str(),-1,&value,
                     DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
