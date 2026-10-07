@@ -697,7 +697,7 @@ void resetToTopCenter(HWND hwnd) {
     GetWindowRect(hwnd, &window);
     const int width = window.right - window.left;
     const int x = monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2;
-    const int y = monitor.rcWork.top + 18;
+    const int y = monitor.rcWork.top + 36;
     SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
@@ -1148,7 +1148,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,LPWSTR,int) {
     GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
     const int initialWidth=ISLAND_WIDTH;
     const int initialX=monitor.rcWork.left+(monitor.rcWork.right-monitor.rcWork.left-initialWidth)/2;
-    const int initialY=monitor.rcWork.top+18;
+    const int initialY=monitor.rcWork.top+36;
     g_hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED,
         wc.lpszClassName,L"X1 AI Island",WS_POPUP,
         initialX,initialY,initialWidth,46,nullptr,nullptr,h,nullptr);
